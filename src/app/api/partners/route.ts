@@ -1,0 +1,52 @@
+import { NextResponse } from 'next/server';
+import { getPartners, createPartner, updatePartner } from '@/lib/db';
+
+export async function GET() {
+  try {
+    const partners = await getPartners();
+    return NextResponse.json({ success: true, partners });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { name, owner_name, phone, address, notes, commission_rate } = body;
+
+    if (!name || !owner_name || !phone) {
+      return NextResponse.json({ success: false, error: 'กรุณากรอกชื่อร้าน ชื่อเจ้าของ และเบอร์โทรศัพท์' }, { status: 400 });
+    }
+
+    const newPartner = await createPartner({
+      name,
+      owner_name,
+      phone,
+      address: address || '',
+      notes: notes || '',
+      commission_rate: Number(commission_rate) || 5.0,
+      is_active: true,
+    });
+
+    return NextResponse.json({ success: true, partner: newPartner });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, updates } = body;
+
+    if (!id || !updates) {
+      return NextResponse.json({ success: false, error: 'Missing partner id or updates' }, { status: 400 });
+    }
+
+    const updated = await updatePartner(id, updates);
+    return NextResponse.json({ success: true, partner: updated });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
+}

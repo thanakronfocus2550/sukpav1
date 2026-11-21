@@ -1,0 +1,901 @@
+import fs from 'fs';
+import path from 'path';
+import {
+  Order,
+  Partner,
+  DeliveryFeeSetting,
+  PartnerBasketRecord,
+  PartnerReport,
+  PartnerReportItem,
+  Payment,
+  Expense,
+  AuditLog,
+  OrderStatus,
+  PaymentStatus,
+  PartnerReportStatus,
+  DormType,
+  WasherWeight,
+  WashProgram,
+  DryerWeight,
+  PaymentMethod,
+  WASHER_PRICING_TABLE,
+  DRYER_PRICING_TABLE,
+} from './types';
+import { sendTelegramNotification } from './telegram';
+import { supabaseAdmin, isSupabaseConfigured } from './supabase';
+
+interface DatabaseState {
+  delivery_fees: DeliveryFeeSetting[];
+  partners: Partner[];
+  orders: Order[];
+  partner_basket_records: PartnerBasketRecord[];
+  partner_reports: PartnerReport[];
+  partner_report_items: PartnerReportItem[];
+  payments: Payment[];
+  expenses: Expense[];
+  audit_logs: AuditLog[];
+}
+
+const DB_FILE_PATH = process.env.VERCEL
+  ? path.join('/tmp', 'sukpa_db.json')
+  : path.join(process.cwd(), 'data', 'sukpa_db.json');
+
+const INITIAL_STATE: DatabaseState = {
+  delivery_fees: [
+    {
+      id: 'fee-inside',
+      dorm_type: 'INSIDE',
+      dorm_type_label: 'หอใน (มจพ. ปราจีนบุรี)',
+      fee_amount: 40.0,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: 'fee-outside',
+      dorm_type: 'OUTSIDE',
+      dorm_type_label: 'หอนอก (รอบมหาวิทยาลัย)',
+      fee_amount: 35.0,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    },
+  ],
+  partners: [
+    {
+      id: 'partner-1',
+      name: 'ร้านซักอบฟองสบู่ (สาขาหน้า มจพ.)',
+      owner_name: 'ป้าสมศรี รักสะอาด',
+      phone: '081-987-6543',
+      address: '123 หมู่ 6 ต.เนินหอม อ.เมืองปราจีนบุรี (เยื้องประตู 1 มจพ.)',
+      notes: 'พาร์ทเนอร์หลัก มีเครื่องซัก 10 เครื่อง อบ 6 เครื่อง บริการพับเรียบร้อย',
+      commission_rate: 5.0,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 'partner-2',
+      name: 'ร้านโมเดิร์นคลีน ลอนดรี้',
+      owner_name: 'คุณเอกชัย วงศ์สว่าง',
+      phone: '086-555-4321',
+      address: '88 ต.เนินหอม อ.เมืองปราจีนบุรี (ติดเซเว่นหอกุลจิรา)',
+      notes: 'พาร์ทเนอร์สำรอง รับงานซักด่วนและซักผ้านวม',
+      commission_rate: 5.0,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    },
+  ],
+  orders: [],
+  partner_basket_records: [],
+  partner_reports: [],
+  partner_report_items: [],
+  payments: [],
+  expenses: [],
+  audit_logs: [],
+};
+
+// In-memory local fallback sync
+function ensureDbFile(): DatabaseState {
+  try {
+    const dir = path.dirname(DB_FILE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    if (!fs.existsSync(DB_FILE_PATH)) {
+      fs.writeFileSync(DB_FILE_PATH, JSON.stringify(INITIAL_STATE, null, 2), 'utf-8');
+      return INITIAL_STATE;
+    }
+    const content = fs.readFileSync(DB_FILE_PATH, 'utf-8');
+    return JSON.parse(content) as DatabaseState;
+  } catch (err) {
+    console.error('Error reading DB file, returning initial state:', err);
+    return INITIAL_STATE;
+  }
+}
+
+function saveDbState(state: DatabaseState): void {
+  try {
+    const dir = path.dirname(DB_FILE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(state, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving DB file:', err);
+  }
+}
+
+// --------------------------------------------------------------------------
+// 1. Delivery Fees
+// --------------------------------------------------------------------------
+export async function getDeliveryFees(): Promise<DeliveryFeeSetting[]> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data } = await supabaseAdmin.from('delivery_fee_settings').select('*');
+    if (data && data.length > 0) return data;
+  }
+  const db = ensureDbFile();
+  return db.delivery_fees;
+}
+
+export async function updateDeliveryFee(dormType: DormType, newAmount: number, actor: string = 'Admin'): Promise<DeliveryFeeSetting> {
+  const db = ensureDbFile();
+  const feeSetting = db.delivery_fees.find((f) => f.dorm_type === dormType);
+  if (!feeSetting) {
+    throw new Error(`Fee setting for ${dormType} not found`);
+  }
+
+  const oldAmount = feeSetting.fee_amount;
+  feeSetting.fee_amount = newAmount;
+  feeSetting.updated_at = new Date().toISOString();
+
+  // Audit Log
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'FEE_SETTING',
+    entity_id: feeSetting.id,
+    action: 'UPDATE_DELIVERY_FEE',
+    actor,
+    old_value: { dorm_type: dormType, fee: oldAmount },
+    new_value: { dorm_type: dormType, fee: newAmount },
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+
+  if (isSupabaseConfigured && supabaseAdmin) {
+    await supabaseAdmin
+      .from('delivery_fee_settings')
+      .update({ fee_amount: newAmount, updated_at: feeSetting.updated_at, updated_by: actor })
+      .eq('dorm_type', dormType);
+  }
+
+  return feeSetting;
+}
+
+// --------------------------------------------------------------------------
+// 2. Partners
+// --------------------------------------------------------------------------
+export async function getPartners(): Promise<Partner[]> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data } = await supabaseAdmin.from('partners').select('*').order('created_at', { ascending: false });
+    if (data && data.length > 0) return data;
+  }
+  const db = ensureDbFile();
+  return db.partners;
+}
+
+export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' | 'commission_rate'> & { commission_rate?: number }): Promise<Partner> {
+  const db = ensureDbFile();
+  const newPartner: Partner = {
+    ...partner,
+    id: `partner-${Date.now()}`,
+    commission_rate: partner.commission_rate ?? 5.0,
+    created_at: new Date().toISOString(),
+  };
+  db.partners.unshift(newPartner);
+
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'PARTNER',
+    entity_id: newPartner.id,
+    action: 'CREATE_PARTNER',
+    actor: 'Admin',
+    new_value: newPartner,
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+  return newPartner;
+}
+
+export async function updatePartner(id: string, updates: Partial<Partner>): Promise<Partner> {
+  const db = ensureDbFile();
+  const partner = db.partners.find((p) => p.id === id);
+  if (!partner) throw new Error('Partner not found');
+
+  const oldPartner = { ...partner };
+  Object.assign(partner, updates);
+
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'PARTNER',
+    entity_id: id,
+    action: 'UPDATE_PARTNER',
+    actor: 'Admin',
+    old_value: oldPartner,
+    new_value: partner,
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+  return partner;
+}
+
+// --------------------------------------------------------------------------
+// 3. Orders & Booking (With Price Snapshot)
+// --------------------------------------------------------------------------
+function generateOrderId(count: number): string {
+  const now = new Date();
+  const year = String(now.getFullYear()).slice(-2);
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const seq = String(count + 1).padStart(4, '0');
+  return `SP${year}${month}${day}-${seq}`;
+}
+
+export async function createOrder(data: {
+  customer_name: string;
+  customer_phone: string;
+  dorm_type: DormType;
+  dorm_name: string;
+  room_no: string;
+  basket_count: number;
+  washer_weight: WasherWeight;
+  wash_program: WashProgram;
+  drum_wash_hot?: boolean;
+  extra_rinse?: boolean;
+  dryer_weight: DryerWeight;
+  extra_dry_count?: number;
+  own_detergent?: boolean;
+  payment_method: PaymentMethod;
+  slip_url?: string;
+  note?: string;
+}): Promise<Order> {
+  const db = ensureDbFile();
+
+  // 1. Delivery fee snapshot: Inside = 40, Outside = 35
+  const feeSetting = db.delivery_fees.find((f) => f.dorm_type === data.dorm_type);
+  const deliveryFeeSnapshot = feeSetting ? feeSetting.fee_amount : data.dorm_type === 'INSIDE' ? 40.0 : 35.0;
+
+  // 2. Exact Washer pricing from table
+  const washerBasePrice =
+    WASHER_PRICING_TABLE[data.washer_weight]?.[data.wash_program] ?? 40;
+  const drumWashHotPrice = data.drum_wash_hot ? 10 : 0;
+  const extraRinsePrice = data.extra_rinse
+    ? ['20KG', '28KG'].includes(data.washer_weight)
+      ? 30
+      : 20
+    : 0;
+  const washerTotalPrice = washerBasePrice + drumWashHotPrice + extraRinsePrice;
+
+  // 3. Exact Dryer pricing from table
+  const dryerBasePrice = DRYER_PRICING_TABLE[data.dryer_weight]?.basePrice ?? 50;
+  const extraDryPrice = (data.extra_dry_count || 0) * 10;
+  const dryerTotalPrice = dryerBasePrice + extraDryPrice;
+
+  // 4. Grand Total (Delivery + Washer + Dryer + Add-ons)
+  const totalAmount = deliveryFeeSnapshot + washerTotalPrice + dryerTotalPrice;
+
+  // 5. Generate sequential Order ID
+  const orderId = generateOrderId(db.orders.length);
+
+  const paymentStatus: PaymentStatus =
+    data.payment_method === 'CASH'
+      ? 'PENDING'
+      : data.slip_url
+      ? 'WAITING_VERIFICATION'
+      : 'PENDING';
+
+  const newOrder: Order = {
+    id: `order-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    order_id: orderId,
+    customer_name: data.customer_name.trim(),
+    customer_phone: data.customer_phone.trim(),
+    dorm_type: data.dorm_type,
+    dorm_name: data.dorm_name.trim(),
+    room_no: data.room_no.trim(),
+    basket_count: Number(data.basket_count) || 1,
+    washer_weight: data.washer_weight,
+    wash_program: data.wash_program,
+    washer_price: washerTotalPrice,
+    drum_wash_hot: Boolean(data.drum_wash_hot),
+    extra_rinse: Boolean(data.extra_rinse),
+    dryer_weight: data.dryer_weight,
+    dryer_price: dryerTotalPrice,
+    extra_dry_count: data.extra_dry_count || 0,
+    own_detergent: Boolean(data.own_detergent),
+    note: data.note?.trim() || '',
+    delivery_fee: deliveryFeeSnapshot,
+    laundry_cost_estimate: washerTotalPrice + dryerTotalPrice,
+    total_amount: totalAmount,
+    payment_method: data.payment_method,
+    slip_url: data.slip_url,
+    status: 'NEW',
+    actual_partner_baskets: 0,
+    partner_commission_rate: 5.0,
+    partner_commission_total: 0,
+    payment_status: paymentStatus,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  db.orders.unshift(newOrder);
+
+  // Create initial payment record
+  const initialPayment: Payment = {
+    id: `pay-${Date.now()}`,
+    order_id: newOrder.id,
+    order_code: newOrder.order_id,
+    customer_name: newOrder.customer_name,
+    customer_phone: newOrder.customer_phone,
+    amount: newOrder.total_amount,
+    payment_method: data.payment_method,
+    slip_url: data.slip_url,
+    status: paymentStatus,
+    created_at: new Date().toISOString(),
+  };
+  db.payments.unshift(initialPayment);
+
+  // Audit log
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'ORDER',
+    entity_id: newOrder.id,
+    action: 'CREATE_ORDER',
+    actor: 'Customer (Self-service)',
+    new_value: newOrder,
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+
+  // Telegram alert
+  sendTelegramNotification({
+    event: 'NEW_ORDER',
+    orderId: newOrder.order_id,
+    customerName: newOrder.customer_name,
+    phone: newOrder.customer_phone,
+    dormInfo: `${newOrder.dorm_name} ห้อง ${newOrder.room_no} (${newOrder.dorm_type === 'INSIDE' ? 'หอใน' : 'หอนอก'})`,
+    basketCount: newOrder.basket_count,
+    amount: newOrder.total_amount,
+    extraInfo: `ซัก ${data.washer_weight} (${washerTotalPrice}บ.) + อบ ${data.dryer_weight} (${dryerTotalPrice}บ.) | รวมส่ง: ฿${totalAmount}`,
+  }).catch((e) => console.error('Telegram notification error:', e));
+
+  return newOrder;
+}
+
+export async function getOrders(filters?: {
+  status?: OrderStatus;
+  search?: string;
+}): Promise<Order[]> {
+  const db = ensureDbFile();
+  let list = db.orders;
+
+  if (filters?.status) {
+    list = list.filter((o) => o.status === filters.status);
+  }
+  if (filters?.search) {
+    const q = filters.search.toLowerCase().trim();
+    list = list.filter(
+      (o) =>
+        o.order_id.toLowerCase().includes(q) ||
+        o.customer_name.toLowerCase().includes(q) ||
+        o.customer_phone.includes(q) ||
+        o.dorm_name.toLowerCase().includes(q)
+    );
+  }
+  return list;
+}
+
+export async function getOrderById(orderId: string): Promise<Order | null> {
+  const db = ensureDbFile();
+  const found = db.orders.find(
+    (o) => o.order_id.toUpperCase() === orderId.toUpperCase() || o.id === orderId
+  );
+  return found || null;
+}
+
+// Secure Customer Order Tracking: requires matching last 4 digits of phone number
+export async function trackOrderCustomer(orderId: string, phoneVerification: string): Promise<{ success: boolean; order?: Partial<Order>; message?: string }> {
+  const db = ensureDbFile();
+  const order = db.orders.find((o) => o.order_id.toUpperCase() === orderId.toUpperCase().trim());
+
+  if (!order) {
+    return { success: false, message: 'ไม่พบหมายเลขคำสั่งซื้อนี้ในระบบ กรุณาตรวจสอบใหม่อีกครั้ง' };
+  }
+
+  // Clean phone string (remove hyphens and spaces)
+  const cleanDbPhone = order.customer_phone.replace(/\D/g, '');
+  const cleanInputPhone = phoneVerification.replace(/\D/g, '');
+
+  const isMatched =
+    cleanDbPhone === cleanInputPhone ||
+    cleanDbPhone.endsWith(cleanInputPhone) ||
+    cleanInputPhone.endsWith(cleanDbPhone.slice(-4));
+
+  if (!isMatched) {
+    return { success: false, message: 'เบอร์โทรศัพท์ยืนยันไม่ถูกต้อง กรุณากรอกเบอร์โทรที่ใช้ในการจอง' };
+  }
+
+  // Return privacy-friendly object (masking sensitive data)
+  const safeOrder: Partial<Order> = {
+    order_id: order.order_id,
+    customer_name: order.customer_name.charAt(0) + '***',
+    dorm_type: order.dorm_type,
+    dorm_name: order.dorm_name,
+    room_no: '***',
+    basket_count: order.basket_count,
+    washer_weight: order.washer_weight,
+    dryer_weight: order.dryer_weight,
+    delivery_fee: order.delivery_fee,
+    total_amount: order.total_amount,
+    status: order.status,
+    payment_status: order.payment_status,
+    picked_up_at: order.picked_up_at,
+    sent_to_partner_at: order.sent_to_partner_at,
+    completed_at: order.completed_at,
+    created_at: order.created_at,
+  };
+
+  return { success: true, order: safeOrder };
+}
+
+// --------------------------------------------------------------------------
+// 4. Order Status Transitions & Operations
+// --------------------------------------------------------------------------
+export async function updateOrderStatus(
+  orderId: string,
+  newStatus: OrderStatus,
+  actor: string = 'Admin',
+  cancelledReason?: string
+): Promise<Order> {
+  const db = ensureDbFile();
+  const order = db.orders.find((o) => o.id === orderId || o.order_id === orderId);
+  if (!order) throw new Error('Order not found');
+
+  const oldStatus = order.status;
+  order.status = newStatus;
+  order.updated_at = new Date().toISOString();
+
+  if (newStatus === 'PICKED_UP') {
+    order.picked_up_at = new Date().toISOString();
+  } else if (newStatus === 'COMPLETED') {
+    order.completed_at = new Date().toISOString();
+  } else if (newStatus === 'CANCELLED') {
+    order.cancelled_at = new Date().toISOString();
+    order.cancelled_reason = cancelledReason;
+
+    sendTelegramNotification({
+      event: 'CANCEL_ORDER',
+      orderId: order.order_id,
+      customerName: order.customer_name,
+      reason: cancelledReason,
+    }).catch(console.error);
+  }
+
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'ORDER',
+    entity_id: order.id,
+    action: 'UPDATE_ORDER_STATUS',
+    actor,
+    old_value: { status: oldStatus },
+    new_value: { status: newStatus, cancelled_reason: cancelledReason },
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+  return order;
+}
+
+// --------------------------------------------------------------------------
+// 5. Partner Basket Assignment & 5 THB/Basket Commission
+// --------------------------------------------------------------------------
+export async function assignPartnerAndBaskets(
+  orderId: string,
+  partnerId: string,
+  actualBaskets: number,
+  actor: string = 'Admin',
+  notes?: string
+): Promise<Order> {
+  const db = ensureDbFile();
+  const order = db.orders.find((o) => o.id === orderId || o.order_id === orderId);
+  if (!order) throw new Error('Order not found');
+
+  const partner = db.partners.find((p) => p.id === partnerId);
+  if (!partner) throw new Error('Partner not found');
+
+  const commissionRate = partner.commission_rate || 5.0; // 5 THB/basket
+  const oldBaskets = order.actual_partner_baskets;
+  const oldCommission = order.partner_commission_total;
+
+  order.partner_id = partner.id;
+  order.partner_name = partner.name;
+  order.actual_partner_baskets = Number(actualBaskets);
+  order.partner_commission_rate = commissionRate;
+  order.partner_commission_total = Number(actualBaskets) * commissionRate;
+  order.status = 'SENT_TO_PARTNER';
+  order.sent_to_partner_at = new Date().toISOString();
+  order.updated_at = new Date().toISOString();
+
+  // Create Partner Basket Record
+  const basketRecord: PartnerBasketRecord = {
+    id: `pbr-${Date.now()}`,
+    order_id: order.id,
+    order_code: order.order_id,
+    partner_id: partner.id,
+    partner_name: partner.name,
+    baskets: Number(actualBaskets),
+    rate_per_basket: commissionRate,
+    total_payout: Number(actualBaskets) * commissionRate,
+    recorded_by: actor,
+    recorded_at: new Date().toISOString(),
+    notes,
+  };
+  db.partner_basket_records.unshift(basketRecord);
+
+  // Auto record partner commission as an expense item
+  db.expenses.push({
+    id: `exp-${Date.now()}`,
+    category: 'PARTNER_COMMISSION',
+    title: `ค่าตอบแทนร้าน ${partner.name} (ออเดอร์ ${order.order_id}: ${actualBaskets} ตะกร้า)`,
+    amount: Number(actualBaskets) * commissionRate,
+    expense_date: new Date().toISOString().split('T')[0],
+    order_id: order.id,
+    partner_id: partner.id,
+    created_by: actor,
+    created_at: new Date().toISOString(),
+  });
+
+  // Audit log with full details
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'PARTNER_BASKET',
+    entity_id: order.id,
+    action: 'ASSIGN_PARTNER_BASKETS',
+    actor,
+    old_value: { actual_baskets: oldBaskets, commission: oldCommission },
+    new_value: {
+      partner: partner.name,
+      actual_baskets: actualBaskets,
+      rate: commissionRate,
+      commission_total: Number(actualBaskets) * commissionRate,
+      notes,
+    },
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+
+  // Notify Telegram
+  sendTelegramNotification({
+    event: 'SENT_TO_PARTNER',
+    orderId: order.order_id,
+    partnerName: partner.name,
+    basketCount: Number(actualBaskets),
+    amount: Number(actualBaskets) * commissionRate,
+  }).catch(console.error);
+
+  return order;
+}
+
+// --------------------------------------------------------------------------
+// 6. Partner Daily Reports (Strict Privacy: NO customer names/phones/rooms)
+// --------------------------------------------------------------------------
+export async function generatePartnerDailyReport(
+  partnerId: string,
+  reportDate: string, // YYYY-MM-DD
+  actor: string = 'Admin'
+): Promise<PartnerReport> {
+  const db = ensureDbFile();
+  const partner = db.partners.find((p) => p.id === partnerId);
+  if (!partner) throw new Error('Partner not found');
+
+  // Find all orders delivered to this partner on this date
+  const targetOrders = db.orders.filter((o) => {
+    if (o.partner_id !== partnerId) return false;
+    const sentDate = o.sent_to_partner_at ? o.sent_to_partner_at.split('T')[0] : o.created_at.split('T')[0];
+    return sentDate === reportDate;
+  });
+
+  const reportCode = `RPT-${reportDate.replace(/-/g, '')}-${partner.name.substring(0, 4)}-${Math.floor(100 + Math.random() * 900)}`;
+
+  let totalBaskets = 0;
+  let totalCommission = 0;
+
+  const reportId = `prpt-${Date.now()}`;
+  const reportItems: PartnerReportItem[] = [];
+
+  for (const ord of targetOrders) {
+    const baskets = ord.actual_partner_baskets || ord.basket_count || 1;
+    const commission = baskets * (ord.partner_commission_rate || 5.0);
+    totalBaskets += baskets;
+    totalCommission += commission;
+
+    reportItems.push({
+      id: `prpti-${Date.now()}-${ord.order_id}`,
+      report_id: reportId,
+      order_id: ord.id,
+      order_code: ord.order_id, // STRICT PRIVACY: Only Order ID!
+      baskets,
+      commission_amount: commission,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  const newReport: PartnerReport = {
+    id: reportId,
+    report_code: reportCode,
+    partner_id: partner.id,
+    partner_name: partner.name,
+    report_date: reportDate,
+    total_orders: targetOrders.length,
+    total_baskets: totalBaskets,
+    total_commission: totalCommission,
+    status: 'READY',
+    created_by: actor,
+    created_at: new Date().toISOString(),
+  };
+
+  db.partner_reports.unshift(newReport);
+  db.partner_report_items.push(...reportItems);
+
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'REPORT',
+    entity_id: newReport.id,
+    action: 'GENERATE_PARTNER_REPORT',
+    actor,
+    new_value: {
+      report_code: reportCode,
+      partner: partner.name,
+      orders_count: targetOrders.length,
+      baskets: totalBaskets,
+      commission: totalCommission,
+    },
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+
+  sendTelegramNotification({
+    event: 'PARTNER_REPORT_READY',
+    partnerName: partner.name,
+    reason: reportCode,
+    basketCount: totalBaskets,
+    amount: totalCommission,
+  }).catch(console.error);
+
+  return newReport;
+}
+
+export async function getPartnerReports(): Promise<PartnerReport[]> {
+  const db = ensureDbFile();
+  return db.partner_reports;
+}
+
+export async function getPartnerReportDetail(reportId: string): Promise<{ report: PartnerReport; items: PartnerReportItem[] } | null> {
+  const db = ensureDbFile();
+  const report = db.partner_reports.find((r) => r.id === reportId || r.report_code === reportId);
+  if (!report) return null;
+  const items = db.partner_report_items.filter((i) => i.report_id === report.id);
+  return { report, items };
+}
+
+export async function updatePartnerReportStatus(
+  reportId: string,
+  newStatus: PartnerReportStatus,
+  actor: string = 'Admin'
+): Promise<PartnerReport> {
+  const db = ensureDbFile();
+  const report = db.partner_reports.find((r) => r.id === reportId);
+  if (!report) throw new Error('Report not found');
+
+  const oldStatus = report.status;
+  report.status = newStatus;
+  if (newStatus === 'SENT') {
+    report.sent_at = new Date().toISOString();
+  } else if (newStatus === 'CONFIRMED') {
+    report.confirmed_at = new Date().toISOString();
+  }
+
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'REPORT',
+    entity_id: report.id,
+    action: 'UPDATE_REPORT_STATUS',
+    actor,
+    old_value: { status: oldStatus },
+    new_value: { status: newStatus },
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+  return report;
+}
+
+// --------------------------------------------------------------------------
+// 7. Payment & Slip Verification
+// --------------------------------------------------------------------------
+export async function uploadPaymentSlip(orderId: string, slipUrl: string): Promise<Payment> {
+  const db = ensureDbFile();
+  const order = db.orders.find((o) => o.id === orderId || o.order_id === orderId);
+  if (!order) throw new Error('Order not found');
+
+  order.slip_url = slipUrl;
+  order.payment_status = 'WAITING_VERIFICATION';
+  order.updated_at = new Date().toISOString();
+
+  let payment = db.payments.find((p) => p.order_id === order.id);
+  if (!payment) {
+    const newPayment: Payment = {
+      id: `pay-${Date.now()}`,
+      order_id: order.id,
+      order_code: order.order_id,
+      customer_name: order.customer_name,
+      customer_phone: order.customer_phone,
+      amount: order.total_amount,
+      payment_method: 'PROMPTPAY',
+      status: 'WAITING_VERIFICATION',
+      slip_url: slipUrl,
+      created_at: new Date().toISOString(),
+    };
+    db.payments.unshift(newPayment);
+    payment = newPayment;
+  } else {
+    payment.slip_url = slipUrl;
+    payment.status = 'WAITING_VERIFICATION';
+  }
+
+  saveDbState(db);
+
+  sendTelegramNotification({
+    event: 'SLIP_UPLOADED',
+    orderId: order.order_id,
+    customerName: order.customer_name,
+    amount: order.total_amount,
+  }).catch(console.error);
+
+  return payment;
+}
+
+export async function verifyPayment(
+  paymentId: string,
+  newStatus: 'PAID' | 'WRONG_AMOUNT' | 'REFUNDED',
+  actor: string = 'Admin',
+  rejectReason?: string
+): Promise<Payment> {
+  const db = ensureDbFile();
+  const payment = db.payments.find((p) => p.id === paymentId);
+  if (!payment) throw new Error('Payment not found');
+
+  payment.status = newStatus;
+  payment.verified_at = new Date().toISOString();
+  payment.verified_by = actor;
+  payment.reject_reason = rejectReason;
+
+  const order = db.orders.find((o) => o.id === payment.order_id);
+  if (order) {
+    order.payment_status = newStatus;
+    if (newStatus === 'PAID') {
+      if (order.status === 'NEW') {
+        order.status = 'CONFIRMED';
+      }
+      sendTelegramNotification({
+        event: 'PAYMENT_CONFIRMED',
+        orderId: order.order_id,
+        customerName: order.customer_name,
+        amount: payment.amount,
+      }).catch(console.error);
+    } else if (newStatus === 'WRONG_AMOUNT') {
+      sendTelegramNotification({
+        event: 'WRONG_AMOUNT',
+        orderId: order.order_id,
+        customerName: order.customer_name,
+        phone: order.customer_phone,
+        reason: rejectReason,
+      }).catch(console.error);
+    }
+  }
+
+  db.audit_logs.push({
+    id: `audit-${Date.now()}`,
+    entity_type: 'PAYMENT',
+    entity_id: payment.id,
+    action: 'VERIFY_PAYMENT',
+    actor,
+    new_value: { status: newStatus, reject_reason: rejectReason },
+    created_at: new Date().toISOString(),
+  });
+
+  saveDbState(db);
+  return payment;
+}
+
+export async function getPayments(): Promise<Payment[]> {
+  const db = ensureDbFile();
+  return db.payments;
+}
+
+// --------------------------------------------------------------------------
+// 8. Finance, Expenses & Accounting Summary
+// --------------------------------------------------------------------------
+export async function getExpenses(): Promise<Expense[]> {
+  const db = ensureDbFile();
+  return db.expenses;
+}
+
+export async function addExpense(expense: Omit<Expense, 'id' | 'created_at'>): Promise<Expense> {
+  const db = ensureDbFile();
+  const newExp: Expense = {
+    ...expense,
+    id: `exp-${Date.now()}`,
+    created_at: new Date().toISOString(),
+  };
+  db.expenses.unshift(newExp);
+  saveDbState(db);
+  return newExp;
+}
+
+export async function getFinancialSummary() {
+  const db = ensureDbFile();
+  const orders = db.orders;
+
+  const totalOrders = orders.length;
+  const completedOrders = orders.filter((o) => o.status === 'COMPLETED').length;
+  const pendingOrders = orders.filter((o) => o.status === 'NEW' || o.status === 'CONFIRMED').length;
+  const activeOrders = orders.filter((o) => ['PICKED_UP', 'SENT_TO_PARTNER', 'WASHING', 'READY', 'DELIVERING'].includes(o.status)).length;
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Revenue from paid/confirmed delivery fees
+  let totalRevenue = 0;
+  let todayRevenue = 0;
+
+  for (const o of orders) {
+    if (o.status !== 'CANCELLED') {
+      totalRevenue += o.delivery_fee;
+      if (o.created_at.startsWith(todayStr)) {
+        todayRevenue += o.delivery_fee;
+      }
+    }
+  }
+
+  // Expenses: Partner commissions + other costs
+  let totalExpenses = 0;
+  let partnerCommissionExpense = 0;
+
+  for (const exp of db.expenses) {
+    totalExpenses += exp.amount;
+    if (exp.category === 'PARTNER_COMMISSION') {
+      partnerCommissionExpense += exp.amount;
+    }
+  }
+
+  const grossProfit = totalRevenue - totalExpenses;
+
+  return {
+    totalOrders,
+    completedOrders,
+    pendingOrders,
+    activeOrders,
+    todayRevenue,
+    totalRevenue,
+    totalExpenses,
+    partnerCommissionExpense,
+    grossProfit,
+  };
+}
+
+export async function getAuditLogs(): Promise<AuditLog[]> {
+  const db = ensureDbFile();
+  return db.audit_logs.slice(0, 100);
+}
