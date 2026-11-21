@@ -7,7 +7,13 @@ export const metadata: Metadata = {
   title: 'SUK PA? (ซักป่ะ?) — บริการรับ-ส่งผ้า มจพ. ปราจีนบุรี',
   description: 'บริการจองรับ-ส่งผ้าถึงหอพัก สะดวก รวดเร็ว สะอาด สำหรับนักศึกษา มจพ. ปราจีนบุรี',
   icons: {
-    icon: '/images/mascot.jpg',
+    icon: [
+      { url: '/images/mascot.jpg', type: 'image/jpeg' },
+      { url: '/favicon.ico' },
+    ],
+    apple: [
+      { url: '/images/mascot.jpg' },
+    ],
   },
 };
 
