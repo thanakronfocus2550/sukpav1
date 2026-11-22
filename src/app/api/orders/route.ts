@@ -53,13 +53,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'ประเภทที่พักไม่ถูกต้อง' }, { status: 400 });
     }
 
+    const basketCount = basket_count === undefined ? 1 : Number(basket_count);
+    if (!Number.isSafeInteger(basketCount) || basketCount < 1) {
+      return NextResponse.json({ success: false, error: 'จำนวนตะกร้าต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป' }, { status: 400 });
+    }
+
     const order = await createOrder({
       customer_name,
       customer_phone,
       dorm_type,
       dorm_name,
       room_no,
-      basket_count: Number(basket_count) || 1,
+      basket_count: basketCount,
       washer_weight: (washer_weight as WasherWeight) || '9KG',
       wash_program: (wash_program as WashProgram) || 'COLD_STANDARD',
       drum_wash_hot: Boolean(drum_wash_hot),

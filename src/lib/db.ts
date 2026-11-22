@@ -328,6 +328,10 @@ export async function createOrder(data: {
   note?: string;
 }): Promise<Order> {
   const db = ensureDbFile();
+  const basketCount = Number(data.basket_count);
+  if (!Number.isSafeInteger(basketCount) || basketCount < 1) {
+    throw new Error('จำนวนตะกร้าต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป');
+  }
 
   // 1. Delivery fee snapshot: Inside = 40, Outside = 35
   let deliveryFeeSnapshot = data.dorm_type === 'INSIDE' ? 40.0 : 35.0;
@@ -355,12 +359,12 @@ export async function createOrder(data: {
       ? 30
       : 20
     : 0;
-  const washerTotalPrice = washerBasePrice + drumWashHotPrice + extraRinsePrice;
+  const washerTotalPrice = (washerBasePrice + drumWashHotPrice + extraRinsePrice) * basketCount;
 
   // 3. Exact Dryer pricing from table
   const dryerBasePrice = DRYER_PRICING_TABLE[data.dryer_weight]?.basePrice ?? 50;
   const extraDryPrice = (data.extra_dry_count || 0) * 10;
-  const dryerTotalPrice = dryerBasePrice + extraDryPrice;
+  const dryerTotalPrice = dryerBasePrice * basketCount + extraDryPrice;
 
   // 4. Grand Total (Delivery + Washer + Dryer + Add-ons)
   const totalAmount = deliveryFeeSnapshot + washerTotalPrice + dryerTotalPrice;
@@ -393,7 +397,7 @@ export async function createOrder(data: {
     dorm_type: data.dorm_type,
     dorm_name: data.dorm_name.trim(),
     room_no: data.room_no.trim(),
-    basket_count: Number(data.basket_count) || 1,
+    basket_count: basketCount,
     washer_weight: data.washer_weight,
     wash_program: data.wash_program,
     washer_price: washerTotalPrice,

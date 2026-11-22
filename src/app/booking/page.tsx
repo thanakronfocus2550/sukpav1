@@ -161,11 +161,12 @@ export default function BookingPage() {
       ? 30
       : 20
     : 0;
-  const totalWasherPrice = washerBasePrice + drumWashHotFee + extraRinseFee;
+  const washerPricePerBasket = washerBasePrice + drumWashHotFee + extraRinseFee;
+  const totalWasherPrice = washerPricePerBasket * basketCount;
 
   const dryerBasePrice = DRYER_PRICING_TABLE[dryerWeight].basePrice;
   const extraDryFee = extraDryCount * 10;
-  const totalDryerPrice = dryerBasePrice + extraDryFee;
+  const totalDryerPrice = dryerBasePrice * basketCount + extraDryFee;
 
   const grandTotal = deliveryFee + totalWasherPrice + totalDryerPrice;
 
@@ -842,13 +843,14 @@ export default function BookingPage() {
                   <span>
                     เครื่องซัก {washerWeight.replace('KG', 'kg')} ({WASH_PROGRAM_LABELS[washProgram].label.split(' ')[0]}
                     {drumWashHot ? ' +ล้างถัง' : ''}
-                    {extraRinse ? ' +ล้างน้ำเพิ่ม' : ''}):
+                    {extraRinse ? ' +ล้างน้ำเพิ่ม' : ''}) × {basketCount} ตะกร้า:
                   </span>
                   <span className="font-bold text-slate-800">฿{totalWasherPrice.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>
-                    เครื่องอบ {dryerWeight.replace('KG', 'kg')} (อบ 25 นาที{extraDryCount > 0 ? ` +ต่อเวลา ${extraDryCount} รอบ` : ''}):
+                    เครื่องอบ {dryerWeight.replace('KG', 'kg')} × {basketCount} ตะกร้า
+                    {extraDryCount > 0 ? ` (+ต่อเวลา ${extraDryCount} รอบ)` : ''}:
                   </span>
                   <span className="font-bold text-slate-800">฿{totalDryerPrice.toFixed(2)}</span>
                 </div>
