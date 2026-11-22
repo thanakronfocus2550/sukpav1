@@ -974,6 +974,87 @@ export async function generatePartnerDailyReport(
   reportDate: string, // YYYY-MM-DD
   actor: string = 'Admin'
 ): Promise<PartnerReport> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data: partner, error: partnerError } = await supabaseAdmin
+      .from('partners')
+      .select('*')
+      .eq('id', partnerId)
+      .maybeSingle();
+    if (partnerError) throw new Error(`ไม่สามารถอ่านข้อมูลพาร์ทเนอร์ได้: ${partnerError.message}`);
+    if (!partner) throw new Error('Partner not found');
+
+    const nextDay = new Date(`${reportDate}T00:00:00.000Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const nextDate = nextDay.toISOString().slice(0, 10);
+
+    const { data: targetOrders, error: ordersError } = await supabaseAdmin
+      .from('orders')
+      .select('id,order_id,actual_partner_baskets,basket_count,partner_commission_rate')
+      .eq('partner_id', partnerId)
+      .gte('sent_to_partner_at', `${reportDate}T00:00:00.000Z`)
+      .lt('sent_to_partner_at', `${nextDate}T00:00:00.000Z`);
+    if (ordersError) throw new Error(`ไม่สามารถดึงออเดอร์สำหรับรายงานได้: ${ordersError.message}`);
+
+    const orders = targetOrders || [];
+    let totalBaskets = 0;
+    let totalCommission = 0;
+    for (const order of orders) {
+      const baskets = Number(order.actual_partner_baskets || order.basket_count || 1);
+      const commission = baskets * Number(order.partner_commission_rate || partner.commission_rate || 5);
+      totalBaskets += baskets;
+      totalCommission += commission;
+    }
+
+    const reportCode = `RPT-${reportDate.replace(/-/g, '')}-${partner.name.substring(0, 4)}-${Math.floor(100 + Math.random() * 900)}`;
+    const { data: report, error: reportError } = await supabaseAdmin
+      .from('partner_reports')
+      .insert({
+        report_code: reportCode,
+        partner_id: partner.id,
+        report_date: reportDate,
+        total_orders: orders.length,
+        total_baskets: totalBaskets,
+        total_commission: totalCommission,
+        status: 'READY',
+        created_by: actor,
+      })
+      .select('*')
+      .single();
+    if (reportError) throw new Error(`ไม่สามารถสร้างรายงานได้: ${reportError.message}`);
+
+    if (orders.length > 0) {
+      const items = orders.map((order) => ({
+        report_id: report.id,
+        order_id: order.id,
+        order_code: order.order_id,
+        baskets: Number(order.actual_partner_baskets || order.basket_count || 1),
+        commission_amount:
+          Number(order.actual_partner_baskets || order.basket_count || 1)
+          * Number(order.partner_commission_rate || partner.commission_rate || 5),
+      }));
+      const { error: itemsError } = await supabaseAdmin
+        .from('partner_report_items')
+        .insert(items);
+      if (itemsError) throw new Error(`ไม่สามารถบันทึกรายการรายงานได้: ${itemsError.message}`);
+    }
+
+    sendTelegramNotification({
+      event: 'PARTNER_REPORT_READY',
+      partnerName: partner.name,
+      reason: reportCode,
+      basketCount: totalBaskets,
+      amount: totalCommission,
+    }).catch(console.error);
+
+    return {
+      ...report,
+      partner_name: partner.name,
+      total_orders: Number(report.total_orders),
+      total_baskets: Number(report.total_baskets),
+      total_commission: Number(report.total_commission),
+    };
+  }
+
   const db = ensureDbFile();
   const partner = db.partners.find((p) => p.id === partnerId);
   if (!partner) throw new Error('Partner not found');
@@ -1057,11 +1138,61 @@ export async function generatePartnerDailyReport(
 }
 
 export async function getPartnerReports(): Promise<PartnerReport[]> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin
+      .from('partner_reports')
+      .select('*, partners(name)')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(`ไม่สามารถดึงรายงานพาร์ทเนอร์ได้: ${error.message}`);
+    return (data || []).map((report) => ({
+      ...report,
+      partner_name: report.partners?.name || '',
+      total_orders: Number(report.total_orders),
+      total_baskets: Number(report.total_baskets),
+      total_commission: Number(report.total_commission),
+    }));
+  }
+
   const db = ensureDbFile();
   return db.partner_reports;
 }
 
 export async function getPartnerReportDetail(reportId: string): Promise<{ report: PartnerReport; items: PartnerReportItem[] } | null> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reportId.trim());
+    let reportQuery = supabaseAdmin
+      .from('partner_reports')
+      .select('*, partners(name)');
+    reportQuery = isUuid
+      ? reportQuery.eq('id', reportId.trim())
+      : reportQuery.eq('report_code', reportId.trim());
+    const { data: report, error: reportError } = await reportQuery.maybeSingle();
+    if (reportError) throw new Error(`ไม่สามารถดึงรายงานได้: ${reportError.message}`);
+    if (!report) return null;
+
+    const { data: items, error: itemsError } = await supabaseAdmin
+      .from('partner_report_items')
+      .select('*')
+      .eq('report_id', report.id)
+      .order('created_at', { ascending: true });
+    if (itemsError) throw new Error(`ไม่สามารถดึงรายการรายงานได้: ${itemsError.message}`);
+
+    return {
+      report: {
+        ...report,
+        partner_name: report.partners?.name || '',
+        total_orders: Number(report.total_orders),
+        total_baskets: Number(report.total_baskets),
+        total_commission: Number(report.total_commission),
+      },
+      items: (items || []).map((item) => ({
+        ...item,
+        baskets: Number(item.baskets),
+        commission_amount: Number(item.commission_amount),
+      })),
+    };
+  }
+
   const db = ensureDbFile();
   const report = db.partner_reports.find((r) => r.id === reportId || r.report_code === reportId);
   if (!report) return null;
@@ -1074,6 +1205,31 @@ export async function updatePartnerReportStatus(
   newStatus: PartnerReportStatus,
   actor: string = 'Admin'
 ): Promise<PartnerReport> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const updates: Record<string, unknown> = {
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (newStatus === 'SENT') updates.sent_at = new Date().toISOString();
+    if (newStatus === 'CONFIRMED') updates.confirmed_at = new Date().toISOString();
+
+    const { data, error } = await supabaseAdmin
+      .from('partner_reports')
+      .update(updates)
+      .eq('id', reportId)
+      .select('*, partners(name)')
+      .single();
+    if (error) throw new Error(`ไม่สามารถอัปเดตสถานะรายงานได้: ${error.message}`);
+
+    return {
+      ...data,
+      partner_name: data.partners?.name || '',
+      total_orders: Number(data.total_orders),
+      total_baskets: Number(data.total_baskets),
+      total_commission: Number(data.total_commission),
+    };
+  }
+
   const db = ensureDbFile();
   const report = db.partner_reports.find((r) => r.id === reportId);
   if (!report) throw new Error('Report not found');
