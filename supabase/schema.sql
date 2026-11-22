@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE TABLE IF NOT EXISTS partner_basket_records (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE RESTRICT,
+    partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
     baskets INTEGER NOT NULL CHECK (baskets >= 0),
     rate_per_basket NUMERIC(10, 2) NOT NULL DEFAULT 5.00,
     total_payout NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
@@ -153,7 +153,7 @@ CREATE TYPE partner_report_status_enum AS ENUM (
 CREATE TABLE IF NOT EXISTS partner_reports (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     report_code TEXT UNIQUE NOT NULL, -- e.g. RPT-20261122-01
-    partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE RESTRICT,
+    partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
     report_date DATE NOT NULL,
     total_orders INTEGER NOT NULL DEFAULT 0,
     total_baskets INTEGER NOT NULL DEFAULT 0,
@@ -303,6 +303,7 @@ CREATE POLICY "Service role full access on orders" ON orders
 -- Service role / Admin has full access to all tables
 CREATE POLICY "Service role full access delivery_fee_settings" ON delivery_fee_settings FOR ALL USING (TRUE);
 CREATE POLICY "Service role full access partners" ON partners FOR ALL USING (TRUE);
+CREATE POLICY "Allow public full access partners" ON partners FOR ALL USING (TRUE) WITH CHECK (TRUE);
 CREATE POLICY "Service role full access customers" ON customers FOR ALL USING (TRUE);
 CREATE POLICY "Service role full access payments" ON payments FOR ALL USING (TRUE);
 CREATE POLICY "Service role full access partner_basket_records" ON partner_basket_records FOR ALL USING (TRUE);

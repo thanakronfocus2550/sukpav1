@@ -22,7 +22,7 @@ import {
   DRYER_PRICING_TABLE,
 } from './types';
 import { sendTelegramNotification } from './telegram';
-import { supabaseAdmin, isSupabaseConfigured } from './supabase';
+import { supabaseAdmin, supabasePublic, isSupabaseConfigured } from './supabase';
 
 interface DatabaseState {
   delivery_fees: DeliveryFeeSetting[];
@@ -59,30 +59,7 @@ const INITIAL_STATE: DatabaseState = {
       updated_at: new Date().toISOString(),
     },
   ],
-  partners: [
-    {
-      id: 'partner-1',
-      name: 'ร้านซักอบฟองสบู่ (สาขาหน้า มจพ.)',
-      owner_name: 'ป้าสมศรี รักสะอาด',
-      phone: '081-987-6543',
-      address: '123 หมู่ 6 ต.เนินหอม อ.เมืองปราจีนบุรี (เยื้องประตู 1 มจพ.)',
-      notes: 'พาร์ทเนอร์หลัก มีเครื่องซัก 10 เครื่อง อบ 6 เครื่อง บริการพับเรียบร้อย',
-      commission_rate: 5.0,
-      is_active: true,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'partner-2',
-      name: 'ร้านโมเดิร์นคลีน ลอนดรี้',
-      owner_name: 'คุณเอกชัย วงศ์สว่าง',
-      phone: '086-555-4321',
-      address: '88 ต.เนินหอม อ.เมืองปราจีนบุรี (ติดเซเว่นหอกุลจิรา)',
-      notes: 'พาร์ทเนอร์สำรอง รับงานซักด่วนและซักผ้านวม',
-      commission_rate: 5.0,
-      is_active: true,
-      created_at: new Date().toISOString(),
-    },
-  ],
+  partners: [],
   orders: [],
   partner_basket_records: [],
   partner_reports: [],
@@ -174,10 +151,13 @@ export async function updateDeliveryFee(dormType: DormType, newAmount: number, a
 // 2. Partners
 // --------------------------------------------------------------------------
 export async function getPartners(): Promise<Partner[]> {
-  if (isSupabaseConfigured && supabaseAdmin) {
+  const client = supabaseAdmin || supabasePublic;
+  if (isSupabaseConfigured && client) {
     try {
-      const { data } = await supabaseAdmin.from('partners').select('*').order('created_at', { ascending: false });
-      if (data && data.length > 0) return data;
+      const { data, error } = await client.from('partners').select('*').order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        return data;
+      }
     } catch (e) {
       console.error('Supabase getPartners error:', e);
     }
@@ -190,10 +170,11 @@ export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' |
   const db = ensureDbFile();
   let createdId = `partner-${Date.now()}`;
   const nowIso = new Date().toISOString();
+  const client = supabaseAdmin || supabasePublic;
 
-  if (isSupabaseConfigured && supabaseAdmin) {
+  if (isSupabaseConfigured && client) {
     try {
-      const { data, error } = await supabaseAdmin.from('partners').insert({
+      const { data, error } = await client.from('partners').insert({
         name: partner.name,
         owner_name: partner.owner_name,
         phone: partner.phone,
@@ -207,9 +188,11 @@ export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' |
         createdId = data.id;
       } else if (error) {
         console.error('Supabase createPartner error:', error);
+        throw new Error(error.message);
       }
     } catch (e) {
       console.error('Failed to insert partner into Supabase:', e);
+      throw e;
     }
   }
 
@@ -256,17 +239,22 @@ export async function updatePartner(id: string, updates: Partial<Partner>): Prom
     saveDbState(db);
   }
 
-  if (isSupabaseConfigured && supabaseAdmin) {
+  const client = supabaseAdmin || supabasePublic;
+  if (isSupabaseConfigured && client) {
     try {
-      const { error } = await supabaseAdmin.from('partners').update(updates).eq('id', id);
-      if (error) console.error('Supabase updatePartner error:', error);
+      const { error } = await client.from('partners').update(updates).eq('id', id);
+      if (error) {
+        console.error('Supabase updatePartner error:', error);
+        throw new Error(error.message);
+      }
     } catch (e) {
       console.error('Failed to update partner in Supabase:', e);
+      throw e;
     }
   }
 
-  if (!partner && isSupabaseConfigured && supabaseAdmin) {
-    const { data } = await supabaseAdmin.from('partners').select('*').eq('id', id).single();
+  if (!partner && isSupabaseConfigured && client) {
+    const { data } = await client.from('partners').select('*').eq('id', id).single();
     if (data) return data;
   }
 
@@ -290,12 +278,17 @@ export async function deletePartner(id: string): Promise<boolean> {
     saveDbState(db);
   }
 
-  if (isSupabaseConfigured && supabaseAdmin) {
+  const client = supabaseAdmin || supabasePublic;
+  if (isSupabaseConfigured && client) {
     try {
-      const { error } = await supabaseAdmin.from('partners').delete().eq('id', id);
-      if (error) console.error('Supabase deletePartner error:', error);
+      const { error } = await client.from('partners').delete().eq('id', id);
+      if (error) {
+        console.error('Supabase deletePartner error:', error);
+        throw new Error(error.message);
+      }
     } catch (e) {
       console.error('Failed to delete partner from Supabase:', e);
+      throw e;
     }
   }
 
