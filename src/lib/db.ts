@@ -328,8 +328,21 @@ export async function createOrder(data: {
   const db = ensureDbFile();
 
   // 1. Delivery fee snapshot: Inside = 40, Outside = 35
-  const feeSetting = db.delivery_fees.find((f) => f.dorm_type === data.dorm_type);
-  const deliveryFeeSnapshot = feeSetting ? feeSetting.fee_amount : data.dorm_type === 'INSIDE' ? 40.0 : 35.0;
+  let deliveryFeeSnapshot = data.dorm_type === 'INSIDE' ? 40.0 : 35.0;
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data: feeData } = await supabaseAdmin
+      .from('delivery_fee_settings')
+      .select('fee_amount')
+      .eq('dorm_type', data.dorm_type)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (feeData?.fee_amount !== undefined) {
+      deliveryFeeSnapshot = Number(feeData.fee_amount);
+    }
+  } else {
+    const feeSetting = db.delivery_fees.find((f) => f.dorm_type === data.dorm_type);
+    if (feeSetting) deliveryFeeSnapshot = feeSetting.fee_amount;
+  }
 
   // 2. Exact Washer pricing from table
   const washerBasePrice =
@@ -351,7 +364,17 @@ export async function createOrder(data: {
   const totalAmount = deliveryFeeSnapshot + washerTotalPrice + dryerTotalPrice;
 
   // 5. Generate sequential Order ID
-  const orderId = generateOrderId(db.orders.length);
+  let todayOrderCount = db.orders.length;
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+    const { count } = await supabaseAdmin
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', startOfDay);
+    todayOrderCount = count || 0;
+  }
+  const orderId = generateOrderId(todayOrderCount);
 
   const paymentStatus: PaymentStatus =
     data.payment_method === 'CASH'
@@ -392,6 +415,82 @@ export async function createOrder(data: {
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data: customer, error: customerError } = await supabaseAdmin
+      .from('customers')
+      .insert({
+        full_name: newOrder.customer_name,
+        phone: newOrder.customer_phone,
+        dorm_type: newOrder.dorm_type,
+        dorm_name: newOrder.dorm_name,
+        room_no: newOrder.room_no,
+        last_order_at: newOrder.created_at,
+      })
+      .select('id')
+      .single();
+
+    if (customerError) {
+      throw new Error(`ไม่สามารถบันทึกข้อมูลลูกค้าได้: ${customerError.message}`);
+    }
+
+    const { data: insertedOrder, error: orderError } = await supabaseAdmin
+      .from('orders')
+      .insert({
+        order_id: newOrder.order_id,
+        customer_id: customer?.id,
+        customer_name: newOrder.customer_name,
+        customer_phone: newOrder.customer_phone,
+        dorm_type: newOrder.dorm_type,
+        dorm_name: newOrder.dorm_name,
+        room_no: newOrder.room_no,
+        basket_count: newOrder.basket_count,
+        service_type: 'WASH_AND_DRY',
+        washer_weight: newOrder.washer_weight,
+        wash_program: newOrder.wash_program,
+        washer_price: newOrder.washer_price,
+        drum_wash_hot: Boolean(newOrder.drum_wash_hot),
+        extra_rinse: Boolean(newOrder.extra_rinse),
+        dryer_weight: newOrder.dryer_weight,
+        dryer_price: newOrder.dryer_price,
+        extra_dry_count: newOrder.extra_dry_count || 0,
+        own_detergent: Boolean(newOrder.own_detergent),
+        note: newOrder.note || '',
+        delivery_fee: newOrder.delivery_fee,
+        laundry_cost_estimate: newOrder.laundry_cost_estimate,
+        total_amount: newOrder.total_amount,
+        payment_method: newOrder.payment_method,
+        payment_status: newOrder.payment_status,
+        slip_url: newOrder.slip_url,
+        status: newOrder.status,
+        actual_partner_baskets: 0,
+        partner_commission_rate: 5,
+      })
+      .select('*')
+      .single();
+
+    if (orderError) {
+      throw new Error(`ไม่สามารถบันทึกออเดอร์ได้: ${orderError.message}`);
+    }
+
+    newOrder.id = insertedOrder.id;
+    newOrder.created_at = insertedOrder.created_at || newOrder.created_at;
+    newOrder.updated_at = insertedOrder.updated_at || newOrder.updated_at;
+
+    const { error: paymentError } = await supabaseAdmin
+      .from('payments')
+      .insert({
+        order_id: insertedOrder.id,
+        amount: newOrder.total_amount,
+        payment_method: newOrder.payment_method,
+        slip_url: newOrder.slip_url,
+        status: newOrder.payment_status,
+      });
+
+    if (paymentError) {
+      console.error('Supabase initial payment error:', paymentError);
+    }
+  }
 
   db.orders.unshift(newOrder);
 
@@ -442,6 +541,42 @@ export async function getOrders(filters?: {
   status?: OrderStatus;
   search?: string;
 }): Promise<Order[]> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    let query = supabaseAdmin
+      .from('orders')
+      .select('*, partners(name)')
+      .order('created_at', { ascending: false });
+
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+    if (filters?.search) {
+      const q = filters.search.trim();
+      if (q) {
+        query = query.or(
+          `order_id.ilike.%${q}%,customer_name.ilike.%${q}%,customer_phone.ilike.%${q}%,dorm_name.ilike.%${q}%`
+        );
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(`ไม่สามารถดึงออเดอร์จาก Supabase ได้: ${error.message}`);
+    if (Array.isArray(data)) {
+      return data.map((row) => ({
+        ...row,
+        washer_price: Number(row.washer_price),
+        dryer_price: Number(row.dryer_price),
+        delivery_fee: Number(row.delivery_fee),
+        laundry_cost_estimate: Number(row.laundry_cost_estimate || 0),
+        total_amount: Number(row.total_amount),
+        actual_partner_baskets: Number(row.actual_partner_baskets || 0),
+        partner_commission_rate: Number(row.partner_commission_rate || 5),
+        partner_commission_total: Number(row.partner_commission_total || 0),
+        partner_name: row.partners?.name,
+      }));
+    }
+  }
+
   const db = ensureDbFile();
   let list = db.orders;
 
@@ -462,6 +597,29 @@ export async function getOrders(filters?: {
 }
 
 export async function getOrderById(orderId: string): Promise<Order | null> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin
+      .from('orders')
+      .select('*, partners(name)')
+      .or(`id.eq.${orderId},order_id.eq.${orderId}`)
+      .maybeSingle();
+    if (error) throw new Error(`ไม่สามารถดึงออเดอร์ได้: ${error.message}`);
+    if (data) {
+      return {
+        ...data,
+        washer_price: Number(data.washer_price),
+        dryer_price: Number(data.dryer_price),
+        delivery_fee: Number(data.delivery_fee),
+        laundry_cost_estimate: Number(data.laundry_cost_estimate || 0),
+        total_amount: Number(data.total_amount),
+        actual_partner_baskets: Number(data.actual_partner_baskets || 0),
+        partner_commission_rate: Number(data.partner_commission_rate || 5),
+        partner_commission_total: Number(data.partner_commission_total || 0),
+        partner_name: data.partners?.name,
+      };
+    }
+  }
+
   const db = ensureDbFile();
   const found = db.orders.find(
     (o) => o.order_id.toUpperCase() === orderId.toUpperCase() || o.id === orderId
@@ -471,6 +629,44 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
 
 // Secure Customer Order Tracking: requires matching last 4 digits of phone number
 export async function trackOrderCustomer(orderId: string, phoneVerification: string): Promise<{ success: boolean; order?: Partial<Order>; message?: string }> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const order = await getOrderById(orderId);
+    if (!order) {
+      return { success: false, message: 'ไม่พบหมายเลขคำสั่งซื้อนี้ในระบบ กรุณาตรวจสอบใหม่อีกครั้ง' };
+    }
+
+    const cleanDbPhone = order.customer_phone.replace(/\D/g, '');
+    const cleanInputPhone = phoneVerification.replace(/\D/g, '');
+    const isMatched =
+      cleanDbPhone === cleanInputPhone ||
+      cleanDbPhone.endsWith(cleanInputPhone) ||
+      cleanInputPhone.endsWith(cleanDbPhone.slice(-4));
+
+    if (!isMatched) {
+      return { success: false, message: 'เบอร์โทรศัพท์ยืนยันไม่ถูกต้อง กรุณากรอกเบอร์โทรที่ใช้ในการจอง' };
+    }
+
+    const safeOrder: Partial<Order> = {
+      order_id: order.order_id,
+      customer_name: order.customer_name.charAt(0) + '***',
+      dorm_type: order.dorm_type,
+      dorm_name: order.dorm_name,
+      room_no: '***',
+      basket_count: order.basket_count,
+      washer_weight: order.washer_weight,
+      dryer_weight: order.dryer_weight,
+      delivery_fee: order.delivery_fee,
+      total_amount: order.total_amount,
+      status: order.status,
+      payment_status: order.payment_status,
+      picked_up_at: order.picked_up_at,
+      sent_to_partner_at: order.sent_to_partner_at,
+      completed_at: order.completed_at,
+      created_at: order.created_at,
+    };
+    return { success: true, order: safeOrder };
+  }
+
   const db = ensureDbFile();
   const order = db.orders.find((o) => o.order_id.toUpperCase() === orderId.toUpperCase().trim());
 
@@ -523,6 +719,52 @@ export async function updateOrderStatus(
   actor: string = 'Admin',
   cancelledReason?: string
 ): Promise<Order> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const order = await getOrderById(orderId);
+    if (!order) throw new Error('Order not found');
+
+    const updates: Record<string, unknown> = {
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (newStatus === 'PICKED_UP') updates.picked_up_at = new Date().toISOString();
+    if (newStatus === 'COMPLETED') updates.completed_at = new Date().toISOString();
+    if (newStatus === 'CANCELLED') {
+      updates.cancelled_at = new Date().toISOString();
+      updates.cancelled_reason = cancelledReason;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('orders')
+      .update(updates)
+      .eq('id', order.id)
+      .select('*, partners(name)')
+      .single();
+    if (error) throw new Error(`ไม่สามารถอัปเดตสถานะออเดอร์ได้: ${error.message}`);
+
+    if (newStatus === 'CANCELLED') {
+      sendTelegramNotification({
+        event: 'CANCEL_ORDER',
+        orderId: order.order_id,
+        customerName: order.customer_name,
+        reason: cancelledReason,
+      }).catch(console.error);
+    }
+
+    return {
+      ...data,
+      washer_price: Number(data.washer_price),
+      dryer_price: Number(data.dryer_price),
+      delivery_fee: Number(data.delivery_fee),
+      laundry_cost_estimate: Number(data.laundry_cost_estimate || 0),
+      total_amount: Number(data.total_amount),
+      actual_partner_baskets: Number(data.actual_partner_baskets || 0),
+      partner_commission_rate: Number(data.partner_commission_rate || 5),
+      partner_commission_total: Number(data.partner_commission_total || 0),
+      partner_name: data.partners?.name,
+    };
+  }
+
   const db = ensureDbFile();
   const order = db.orders.find((o) => o.id === orderId || o.order_id === orderId);
   if (!order) throw new Error('Order not found');
@@ -572,6 +814,76 @@ export async function assignPartnerAndBaskets(
   actor: string = 'Admin',
   notes?: string
 ): Promise<Order> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const order = await getOrderById(orderId);
+    if (!order) throw new Error('Order not found');
+
+    const { data: partner, error: partnerError } = await supabaseAdmin
+      .from('partners')
+      .select('*')
+      .eq('id', partnerId)
+      .single();
+    if (partnerError || !partner) throw new Error('Partner not found');
+
+    const commissionRate = Number(partner.commission_rate || 5);
+    const sentAt = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('orders')
+      .update({
+        partner_id: partner.id,
+        actual_partner_baskets: Number(actualBaskets),
+        partner_commission_rate: commissionRate,
+        status: 'SENT_TO_PARTNER',
+        sent_to_partner_at: sentAt,
+        updated_at: sentAt,
+      })
+      .eq('id', order.id)
+      .select('*, partners(name)')
+      .single();
+    if (error) throw new Error(`ไม่สามารถมอบหมายพาร์ทเนอร์ได้: ${error.message}`);
+
+    await supabaseAdmin.from('partner_basket_records').insert({
+      order_id: order.id,
+      partner_id: partner.id,
+      baskets: Number(actualBaskets),
+      rate_per_basket: commissionRate,
+      total_payout: Number(actualBaskets) * commissionRate,
+      recorded_by: actor,
+      notes,
+    });
+
+    await supabaseAdmin.from('expenses').insert({
+      category: 'PARTNER_COMMISSION',
+      title: `ค่าตอบแทนร้าน ${partner.name} (ออเดอร์ ${order.order_id}: ${actualBaskets} ตะกร้า)`,
+      amount: Number(actualBaskets) * commissionRate,
+      expense_date: sentAt.split('T')[0],
+      order_id: order.id,
+      partner_id: partner.id,
+      created_by: actor,
+    });
+
+    sendTelegramNotification({
+      event: 'SENT_TO_PARTNER',
+      orderId: order.order_id,
+      partnerName: partner.name,
+      basketCount: Number(actualBaskets),
+      amount: Number(actualBaskets) * commissionRate,
+    }).catch(console.error);
+
+    return {
+      ...data,
+      washer_price: Number(data.washer_price),
+      dryer_price: Number(data.dryer_price),
+      delivery_fee: Number(data.delivery_fee),
+      laundry_cost_estimate: Number(data.laundry_cost_estimate || 0),
+      total_amount: Number(data.total_amount),
+      actual_partner_baskets: Number(data.actual_partner_baskets || 0),
+      partner_commission_rate: Number(data.partner_commission_rate || 5),
+      partner_commission_total: Number(data.partner_commission_total || 0),
+      partner_name: data.partners?.name,
+    };
+  }
+
   const db = ensureDbFile();
   const order = db.orders.find((o) => o.id === orderId || o.order_id === orderId);
   if (!order) throw new Error('Order not found');
