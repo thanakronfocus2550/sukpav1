@@ -596,11 +596,14 @@ export async function getOrders(filters?: {
 
 export async function getOrderById(orderId: string): Promise<Order | null> {
   if (isSupabaseConfigured && supabaseAdmin) {
-    const { data, error } = await supabaseAdmin
+    const value = orderId.trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    let query = supabaseAdmin
       .from('orders')
-      .select('*, partners(name)')
-      .or(`id.eq.${orderId},order_id.eq.${orderId}`)
-      .maybeSingle();
+      .select('*, partners(name)');
+    query = isUuid ? query.eq('id', value) : query.eq('order_id', value);
+
+    const { data, error } = await query.maybeSingle();
     if (error) throw new Error(`ไม่สามารถดึงออเดอร์ได้: ${error.message}`);
     if (data) {
       return {
