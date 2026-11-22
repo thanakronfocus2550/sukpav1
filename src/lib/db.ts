@@ -434,6 +434,17 @@ export async function createOrder(data: {
       throw new Error(`ไม่สามารถบันทึกข้อมูลลูกค้าได้: ${customerError.message}`);
     }
 
+    const optionsNote = [
+      `ซัก ${newOrder.washer_weight} - ${newOrder.wash_program}`,
+      `อบ ${newOrder.dryer_weight}`,
+      newOrder.drum_wash_hot ? 'ซักน้ำอุ่น/อบเพิ่มเติม' : '',
+      newOrder.extra_rinse ? 'ซักล้างเพิ่ม' : '',
+      (newOrder.extra_dry_count || 0) > 0 ? `อบเพิ่ม ${newOrder.extra_dry_count} รอบ` : '',
+      newOrder.own_detergent ? 'ลูกค้านำน้ำยาซักผ้ามาเอง' : '',
+      newOrder.payment_method === 'CASH' ? 'ชำระเงินสดตอนรับผ้า' : 'ชำระพร้อมเพย์',
+      newOrder.note || '',
+    ].filter(Boolean).join(' | ');
+
     const { data: insertedOrder, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
@@ -446,22 +457,10 @@ export async function createOrder(data: {
         room_no: newOrder.room_no,
         basket_count: newOrder.basket_count,
         service_type: 'WASH_AND_DRY',
-        washer_weight: newOrder.washer_weight,
-        wash_program: newOrder.wash_program,
-        washer_price: newOrder.washer_price,
-        drum_wash_hot: Boolean(newOrder.drum_wash_hot),
-        extra_rinse: Boolean(newOrder.extra_rinse),
-        dryer_weight: newOrder.dryer_weight,
-        dryer_price: newOrder.dryer_price,
-        extra_dry_count: newOrder.extra_dry_count || 0,
-        own_detergent: Boolean(newOrder.own_detergent),
-        note: newOrder.note || '',
+        note: optionsNote,
         delivery_fee: newOrder.delivery_fee,
         laundry_cost_estimate: newOrder.laundry_cost_estimate,
         total_amount: newOrder.total_amount,
-        payment_method: newOrder.payment_method,
-        payment_status: newOrder.payment_status,
-        slip_url: newOrder.slip_url,
         status: newOrder.status,
         actual_partner_baskets: 0,
         partner_commission_rate: 5,
@@ -482,7 +481,6 @@ export async function createOrder(data: {
       .insert({
         order_id: insertedOrder.id,
         amount: newOrder.total_amount,
-        payment_method: newOrder.payment_method,
         slip_url: newOrder.slip_url,
         status: newOrder.payment_status,
       });
