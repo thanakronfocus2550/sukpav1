@@ -20,6 +20,7 @@ export default function AdminFinancePage() {
     totalOrders: 0,
     completedOrders: 0,
     todayRevenue: 0,
+    partnerRevenue: 0,
     totalRevenue: 0,
     totalExpenses: 0,
     partnerCommissionExpense: 0,
@@ -133,7 +134,7 @@ export default function AdminFinancePage() {
         {/* Revenue */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-            <span>รายรับรวม (Revenue)</span>
+            <span>รายได้รวมทั้งหมด</span>
             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -142,30 +143,30 @@ export default function AdminFinancePage() {
             ฿{summary.totalRevenue.toFixed(2)}
           </div>
           <p className="text-xs text-slate-400">
-            รายรับวันนี้: ฿{summary.todayRevenue.toFixed(2)}
+            ค่าบริการรับ-ส่งวันนี้: ฿{summary.todayRevenue.toFixed(2)} (หอนอก 35 / หอใน 40)
           </p>
         </div>
 
-        {/* Expenses */}
+        {/* Partner Revenue */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-            <span>รายจ่ายรวม (Expenses)</span>
-            <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
+            <span>รายได้จากพาร์ทเนอร์</span>
+            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
               <CreditCard className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-3xl font-black text-rose-600">
-            ฿{summary.totalExpenses.toFixed(2)}
+          <div className="text-3xl font-black text-purple-600">
+            ฿{summary.partnerRevenue.toFixed(2)}
           </div>
           <p className="text-xs text-slate-400">
-            ค่าตอบแทนพาร์ทเนอร์ (5บ./ตะกร้า): ฿{summary.partnerCommissionExpense.toFixed(2)}
+            เพิ่ม 5 บาทต่อตะกร้า รวมกับค่าบริการในรายได้รวม
           </p>
         </div>
 
         {/* Gross Profit */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-            <span>กำไรเบื้องต้น (Gross Profit)</span>
+            <span>กำไรเบื้องต้น</span>
             <div className="p-2 bg-sky-50 text-sky-600 rounded-xl">
               <Layers className="w-4 h-4" />
             </div>
@@ -174,7 +175,7 @@ export default function AdminFinancePage() {
             ฿{summary.grossProfit.toFixed(2)}
           </div>
           <p className="text-xs text-slate-400">
-            คำนวณจาก: รายรับค่าบริการ - รายจ่ายทั้งหมด
+            รายได้รวมทั้งหมด - รายจ่ายรวม ฿{summary.totalExpenses.toFixed(2)}
           </p>
         </div>
       </div>

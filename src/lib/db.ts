@@ -28,6 +28,7 @@ interface DatabaseState {
   delivery_fees: DeliveryFeeSetting[];
   partners: Partner[];
   orders: Order[];
+  revenue_records?: { category: string; amount: number; record_date: string; order_id?: string }[];
   partner_basket_records: PartnerBasketRecord[];
   partner_reports: PartnerReport[];
   partner_report_items: PartnerReportItem[];
@@ -61,6 +62,7 @@ const INITIAL_STATE: DatabaseState = {
   ],
   partners: [],
   orders: [],
+  revenue_records: [],
   partner_basket_records: [],
   partner_reports: [],
   partner_report_items: [],
@@ -842,7 +844,7 @@ export async function assignPartnerAndBaskets(
       .single();
     if (error) throw new Error(`ไม่สามารถมอบหมายพาร์ทเนอร์ได้: ${error.message}`);
 
-    await supabaseAdmin.from('partner_basket_records').insert({
+    const { error: basketRecordError } = await supabaseAdmin.from('partner_basket_records').insert({
       order_id: order.id,
       partner_id: partner.id,
       baskets: Number(actualBaskets),
@@ -851,16 +853,28 @@ export async function assignPartnerAndBaskets(
       recorded_by: actor,
       notes,
     });
+    if (basketRecordError) {
+      throw new Error(`ไม่สามารถบันทึกจำนวนตะกร้าพาร์ทเนอร์ได้: ${basketRecordError.message}`);
+    }
 
-    await supabaseAdmin.from('expenses').insert({
-      category: 'PARTNER_COMMISSION',
-      title: `ค่าตอบแทนร้าน ${partner.name} (ออเดอร์ ${order.order_id}: ${actualBaskets} ตะกร้า)`,
+    const { error: oldRevenueError } = await supabaseAdmin
+      .from('revenue_records')
+      .delete()
+      .eq('order_id', order.id)
+      .eq('category', 'PARTNER_FEE');
+    if (oldRevenueError) {
+      throw new Error(`ไม่สามารถแก้รายการรายได้พาร์ทเนอร์เดิมได้: ${oldRevenueError.message}`);
+    }
+
+    const { error: revenueError } = await supabaseAdmin.from('revenue_records').insert({
+      category: 'PARTNER_FEE',
       amount: Number(actualBaskets) * commissionRate,
-      expense_date: sentAt.split('T')[0],
+      record_date: sentAt.split('T')[0],
       order_id: order.id,
-      partner_id: partner.id,
-      created_by: actor,
     });
+    if (revenueError) {
+      throw new Error(`ไม่สามารถบันทึกรายได้พาร์ทเนอร์ได้: ${revenueError.message}`);
+    }
 
     sendTelegramNotification({
       event: 'SENT_TO_PARTNER',
@@ -919,17 +933,15 @@ export async function assignPartnerAndBaskets(
   };
   db.partner_basket_records.unshift(basketRecord);
 
-  // Auto record partner commission as an expense item
-  db.expenses.push({
-    id: `exp-${Date.now()}`,
-    category: 'PARTNER_COMMISSION',
-    title: `ค่าตอบแทนร้าน ${partner.name} (ออเดอร์ ${order.order_id}: ${actualBaskets} ตะกร้า)`,
+  db.revenue_records ||= [];
+  db.revenue_records = db.revenue_records.filter((revenue) =>
+    !(revenue.order_id === order.id && revenue.category === 'PARTNER_FEE')
+  );
+  db.revenue_records.push({
+    category: 'PARTNER_FEE',
     amount: Number(actualBaskets) * commissionRate,
-    expense_date: new Date().toISOString().split('T')[0],
+    record_date: new Date().toISOString().split('T')[0],
     order_id: order.id,
-    partner_id: partner.id,
-    created_by: actor,
-    created_at: new Date().toISOString(),
   });
 
   // Audit log with full details
@@ -1466,6 +1478,29 @@ export async function getExpenses(): Promise<Expense[]> {
 }
 
 export async function addExpense(expense: Omit<Expense, 'id' | 'created_at'>): Promise<Expense> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin
+      .from('expenses')
+      .insert({
+        category: expense.category,
+        title: expense.title,
+        amount: expense.amount,
+        expense_date: expense.expense_date,
+        order_id: expense.order_id || null,
+        partner_id: expense.partner_id || null,
+        receipt_url: expense.receipt_url || null,
+        note: expense.note || null,
+        created_by: expense.created_by,
+      })
+      .select('*')
+      .single();
+    if (error) throw new Error(`ไม่สามารถบันทึกรายจ่ายได้: ${error.message}`);
+    return {
+      ...data,
+      amount: Number(data.amount),
+    };
+  }
+
   const db = ensureDbFile();
   const newExp: Expense = {
     ...expense,
@@ -1489,8 +1524,14 @@ export async function getFinancialSummary() {
       .select('amount,category');
     if (expensesError) throw new Error(`ไม่สามารถดึงสรุปรายจ่ายได้: ${expensesError.message}`);
 
+    const { data: revenues, error: revenueError } = await supabaseAdmin
+      .from('revenue_records')
+      .select('amount,category');
+    if (revenueError) throw new Error(`ไม่สามารถดึงรายได้พาร์ทเนอร์ได้: ${revenueError.message}`);
+
     const orderRows = orders || [];
     const expenseRows = expenses || [];
+    const revenueRows = revenues || [];
     const todayStr = new Date().toISOString().split('T')[0];
     const totalOrders = orderRows.length;
     const completedOrders = orderRows.filter((order) => order.status === 'COMPLETED').length;
@@ -1499,15 +1540,20 @@ export async function getFinancialSummary() {
       ['PICKED_UP', 'SENT_TO_PARTNER', 'WASHING', 'READY', 'DELIVERING'].includes(order.status)
     ).length;
 
-    let totalRevenue = 0;
+    let serviceRevenue = 0;
     let todayRevenue = 0;
     for (const order of orderRows) {
       if (order.status !== 'CANCELLED') {
         const fee = Number(order.delivery_fee || 0);
-        totalRevenue += fee;
+        serviceRevenue += fee;
         if (String(order.created_at || '').startsWith(todayStr)) todayRevenue += fee;
       }
     }
+
+    const partnerRevenue = revenueRows
+      .filter((revenue) => revenue.category === 'PARTNER_FEE')
+      .reduce((total, revenue) => total + Number(revenue.amount || 0), 0);
+    const totalRevenue = serviceRevenue + partnerRevenue;
 
     let totalExpenses = 0;
     let partnerCommissionExpense = 0;
@@ -1523,6 +1569,7 @@ export async function getFinancialSummary() {
       pendingOrders,
       activeOrders,
       todayRevenue,
+      partnerRevenue,
       totalRevenue,
       totalExpenses,
       partnerCommissionExpense,
@@ -1540,18 +1587,23 @@ export async function getFinancialSummary() {
 
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Revenue from paid/confirmed delivery fees
-  let totalRevenue = 0;
+  // Delivery service revenue is separate from partner fees.
+  let serviceRevenue = 0;
   let todayRevenue = 0;
 
   for (const o of orders) {
     if (o.status !== 'CANCELLED') {
-      totalRevenue += o.delivery_fee;
+      serviceRevenue += o.delivery_fee;
       if (o.created_at.startsWith(todayStr)) {
         todayRevenue += o.delivery_fee;
       }
     }
   }
+
+  const partnerRevenue = (db.revenue_records || [])
+    .filter((revenue) => revenue.category === 'PARTNER_FEE')
+    .reduce((total, revenue) => total + Number(revenue.amount || 0), 0);
+  const totalRevenue = serviceRevenue + partnerRevenue;
 
   // Expenses: Partner commissions + other costs
   let totalExpenses = 0;
@@ -1572,6 +1624,7 @@ export async function getFinancialSummary() {
     pendingOrders,
     activeOrders,
     todayRevenue,
+    partnerRevenue,
     totalRevenue,
     totalExpenses,
     partnerCommissionExpense,

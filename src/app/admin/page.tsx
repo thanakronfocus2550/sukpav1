@@ -26,6 +26,7 @@ interface SummaryData {
   pendingOrders: number;
   activeOrders: number;
   todayRevenue: number;
+  partnerRevenue: number;
   totalRevenue: number;
   totalExpenses: number;
   partnerCommissionExpense: number;
@@ -114,22 +115,22 @@ export default function AdminDashboardPage() {
           <div className="text-2xl sm:text-3xl font-black text-sky-600">
             ฿{summary ? summary.totalRevenue.toFixed(2) : '0.00'}
           </div>
-          <p className="text-[11px] text-slate-400">หอใน 40.- / หอนอก 35.-</p>
+          <p className="text-[11px] text-slate-400">ค่าบริการ 35/40 บาท + พาร์ทเนอร์ 5 บาท/ตะกร้า</p>
         </div>
 
-        {/* Metric 3: Total Expenses (including 5 THB/basket) */}
+        {/* Metric 3: Partner Revenue */}
         <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-2">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
-            <span>รายจ่ายรวม</span>
-            <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
+            <span>รายได้จากพาร์ทเนอร์</span>
+            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
               <CreditCard className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-rose-600">
-            ฿{summary ? summary.totalExpenses.toFixed(2) : '0.00'}
+          <div className="text-2xl sm:text-3xl font-black text-purple-600">
+            ฿{summary ? summary.partnerRevenue.toFixed(2) : '0.00'}
           </div>
           <p className="text-[11px] text-slate-400">
-            พาร์ทเนอร์ ฿{summary ? summary.partnerCommissionExpense.toFixed(2) : '0.00'}
+            5 บาทต่อหนึ่งตะกร้า
           </p>
         </div>
 
