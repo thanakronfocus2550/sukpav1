@@ -334,7 +334,7 @@ export async function createOrder(data: {
   }
 
   // 1. Delivery fee snapshot: Inside = 40, Outside = 35
-  let deliveryFeeSnapshot = data.dorm_type === 'INSIDE' ? 40.0 : 35.0;
+  let deliveryFeePerBasket = data.dorm_type === 'INSIDE' ? 40.0 : 35.0;
   if (isSupabaseConfigured && supabaseAdmin) {
     const { data: feeData } = await supabaseAdmin
       .from('delivery_fee_settings')
@@ -343,12 +343,13 @@ export async function createOrder(data: {
       .eq('is_active', true)
       .maybeSingle();
     if (feeData?.fee_amount !== undefined) {
-      deliveryFeeSnapshot = Number(feeData.fee_amount);
+      deliveryFeePerBasket = Number(feeData.fee_amount);
     }
   } else {
     const feeSetting = db.delivery_fees.find((f) => f.dorm_type === data.dorm_type);
-    if (feeSetting) deliveryFeeSnapshot = feeSetting.fee_amount;
+    if (feeSetting) deliveryFeePerBasket = feeSetting.fee_amount;
   }
+  const deliveryFeeSnapshot = deliveryFeePerBasket * basketCount;
 
   // 2. Exact Washer pricing from table
   const washerBasePrice =

@@ -153,7 +153,8 @@ export default function BookingPage() {
   };
 
   // Exact Price Calculations according to table
-  const deliveryFee = dormType === 'INSIDE' ? fees.INSIDE : fees.OUTSIDE;
+  const deliveryFeePerBasket = dormType === 'INSIDE' ? fees.INSIDE : fees.OUTSIDE;
+  const deliveryFee = deliveryFeePerBasket * basketCount;
   const washerBasePrice = WASHER_PRICING_TABLE[washerWeight][washProgram];
   const drumWashHotFee = drumWashHot ? 10 : 0;
   const extraRinseFee = extraRinse
@@ -836,7 +837,10 @@ export default function BookingPage() {
 
               <div className="space-y-1.5 text-xs text-slate-600 pt-1">
                 <div className="flex justify-between">
-                  <span>ค่าบริการรับ-ส่ง ({dormType === 'INSIDE' ? 'หอใน' : 'หอนอก'}):</span>
+                  <span>
+                    ค่าบริการรับ-ส่ง ({dormType === 'INSIDE' ? 'หอใน' : 'หอนอก'} ฿{deliveryFeePerBasket}
+                    × {basketCount} ตะกร้า):
+                  </span>
                   <span className="font-bold text-slate-800">฿{deliveryFee.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">

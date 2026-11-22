@@ -207,7 +207,7 @@ export default function HomePage() {
               </div>
               <h3 className="text-xl font-bold text-slate-900">ค่าบริการชัดเจน เป็นธรรม</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                ค่าส่งหอใน 40 บาท / หอนอก 35 บาทต่อออเดอร์ ไม่มีบวกเพิ่ม ไม่ต้องแบกผ้าขี่มอเตอร์ไซค์ไปตากแดดตากฝน
+                ค่ารับ-ส่งหอใน 40 บาท / หอนอก 35 บาทต่อตะกร้า ระบบคำนวณตามจำนวนตะกร้าจริง
               </p>
             </div>
 

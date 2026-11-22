@@ -115,7 +115,7 @@ export default function AdminDashboardPage() {
           <div className="text-2xl sm:text-3xl font-black text-sky-600">
             ฿{summary ? summary.totalRevenue.toFixed(2) : '0.00'}
           </div>
-          <p className="text-[11px] text-slate-400">ค่าบริการ 35/40 บาท + พาร์ทเนอร์ 5 บาท/ตะกร้า</p>
+          <p className="text-[11px] text-slate-400">ค่าบริการ 35/40 บาท/ตะกร้า + พาร์ทเนอร์ 5 บาท/ตะกร้า</p>
         </div>
 
         {/* Metric 3: Partner Revenue */}

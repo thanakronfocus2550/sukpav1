@@ -59,7 +59,7 @@ export default function PricingPage() {
                 </div>
                 <div className="pt-2">
                   <span className="text-5xl font-black text-sky-600">40</span>
-                  <span className="text-slate-500 font-medium ml-2">บาท / ออเดอร์</span>
+                  <span className="text-slate-500 font-medium ml-2">บาท / ตะกร้า</span>
                 </div>
                 <ul className="space-y-2 text-sm text-slate-600 pt-2 border-t border-slate-100">
                   <li className="flex items-center gap-2">
@@ -101,7 +101,7 @@ export default function PricingPage() {
                 </div>
                 <div className="pt-2">
                   <span className="text-5xl font-black text-blue-600">35</span>
-                  <span className="text-slate-500 font-medium ml-2">บาท / ออเดอร์</span>
+                  <span className="text-slate-500 font-medium ml-2">บาท / ตะกร้า</span>
                 </div>
                 <ul className="space-y-2 text-sm text-slate-600 pt-2 border-t border-slate-100">
                   <li className="flex items-center gap-2">

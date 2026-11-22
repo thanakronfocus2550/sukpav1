@@ -122,7 +122,7 @@ export default function AdminFeesPage() {
 
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-700">
-              อัตราค่าบริการ (บาท / ออเดอร์)
+              อัตราค่าบริการ (บาท / ตะกร้า)
             </label>
             <div className="relative">
               <span className="absolute left-4 top-3 text-slate-400 font-bold">฿</span>
@@ -167,7 +167,7 @@ export default function AdminFeesPage() {
 
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-700">
-              อัตราค่าบริการ (บาท / ออเดอร์)
+              อัตราค่าบริการ (บาท / ตะกร้า)
             </label>
             <div className="relative">
               <span className="absolute left-4 top-3 text-slate-400 font-bold">฿</span>

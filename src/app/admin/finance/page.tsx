@@ -143,7 +143,7 @@ export default function AdminFinancePage() {
             ฿{summary.totalRevenue.toFixed(2)}
           </div>
           <p className="text-xs text-slate-400">
-            ค่าบริการรับ-ส่งวันนี้: ฿{summary.todayRevenue.toFixed(2)} (หอนอก 35 / หอใน 40)
+            ค่าบริการรับ-ส่งวันนี้: ฿{summary.todayRevenue.toFixed(2)} (หอนอก 35 / หอใน 40 บาทต่อตะกร้า)
           </p>
         </div>
 
