@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPartners, createPartner, updatePartner } from '@/lib/db';
+import { getPartners, createPartner, updatePartner, deletePartner } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -46,6 +46,30 @@ export async function PATCH(request: Request) {
 
     const updated = await updatePartner(id, updates);
     return NextResponse.json({ success: true, partner: updated });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const queryId = searchParams.get('id');
+    let id = queryId;
+
+    if (!id) {
+      try {
+        const body = await request.json();
+        id = body?.id;
+      } catch {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Missing partner id' }, { status: 400 });
+    }
+
+    await deletePartner(id);
+    return NextResponse.json({ success: true, message: 'Partner deleted successfully' });
   } catch (error) {
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }

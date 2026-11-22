@@ -175,8 +175,12 @@ export async function updateDeliveryFee(dormType: DormType, newAmount: number, a
 // --------------------------------------------------------------------------
 export async function getPartners(): Promise<Partner[]> {
   if (isSupabaseConfigured && supabaseAdmin) {
-    const { data } = await supabaseAdmin.from('partners').select('*').order('created_at', { ascending: false });
-    if (data && data.length > 0) return data;
+    try {
+      const { data } = await supabaseAdmin.from('partners').select('*').order('created_at', { ascending: false });
+      if (data && data.length > 0) return data;
+    } catch (e) {
+      console.error('Supabase getPartners error:', e);
+    }
   }
   const db = ensureDbFile();
   return db.partners;
@@ -184,11 +188,36 @@ export async function getPartners(): Promise<Partner[]> {
 
 export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' | 'commission_rate'> & { commission_rate?: number }): Promise<Partner> {
   const db = ensureDbFile();
+  let createdId = `partner-${Date.now()}`;
+  const nowIso = new Date().toISOString();
+
+  if (isSupabaseConfigured && supabaseAdmin) {
+    try {
+      const { data, error } = await supabaseAdmin.from('partners').insert({
+        name: partner.name,
+        owner_name: partner.owner_name,
+        phone: partner.phone,
+        address: partner.address || '',
+        notes: partner.notes || '',
+        commission_rate: partner.commission_rate ?? 5.0,
+        is_active: partner.is_active ?? true,
+      }).select().single();
+
+      if (data && !error) {
+        createdId = data.id;
+      } else if (error) {
+        console.error('Supabase createPartner error:', error);
+      }
+    } catch (e) {
+      console.error('Failed to insert partner into Supabase:', e);
+    }
+  }
+
   const newPartner: Partner = {
     ...partner,
-    id: `partner-${Date.now()}`,
+    id: createdId,
     commission_rate: partner.commission_rate ?? 5.0,
-    created_at: new Date().toISOString(),
+    created_at: nowIso,
   };
   db.partners.unshift(newPartner);
 
@@ -199,7 +228,7 @@ export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' |
     action: 'CREATE_PARTNER',
     actor: 'Admin',
     new_value: newPartner,
-    created_at: new Date().toISOString(),
+    created_at: nowIso,
   });
 
   saveDbState(db);
@@ -209,24 +238,68 @@ export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' |
 export async function updatePartner(id: string, updates: Partial<Partner>): Promise<Partner> {
   const db = ensureDbFile();
   const partner = db.partners.find((p) => p.id === id);
+  if (partner) {
+    const oldPartner = { ...partner };
+    Object.assign(partner, updates);
+
+    db.audit_logs.push({
+      id: `audit-${Date.now()}`,
+      entity_type: 'PARTNER',
+      entity_id: id,
+      action: 'UPDATE_PARTNER',
+      actor: 'Admin',
+      old_value: oldPartner,
+      new_value: partner,
+      created_at: new Date().toISOString(),
+    });
+
+    saveDbState(db);
+  }
+
+  if (isSupabaseConfigured && supabaseAdmin) {
+    try {
+      const { error } = await supabaseAdmin.from('partners').update(updates).eq('id', id);
+      if (error) console.error('Supabase updatePartner error:', error);
+    } catch (e) {
+      console.error('Failed to update partner in Supabase:', e);
+    }
+  }
+
+  if (!partner && isSupabaseConfigured && supabaseAdmin) {
+    const { data } = await supabaseAdmin.from('partners').select('*').eq('id', id).single();
+    if (data) return data;
+  }
+
   if (!partner) throw new Error('Partner not found');
-
-  const oldPartner = { ...partner };
-  Object.assign(partner, updates);
-
-  db.audit_logs.push({
-    id: `audit-${Date.now()}`,
-    entity_type: 'PARTNER',
-    entity_id: id,
-    action: 'UPDATE_PARTNER',
-    actor: 'Admin',
-    old_value: oldPartner,
-    new_value: partner,
-    created_at: new Date().toISOString(),
-  });
-
-  saveDbState(db);
   return partner;
+}
+
+export async function deletePartner(id: string): Promise<boolean> {
+  const db = ensureDbFile();
+  const index = db.partners.findIndex((p) => p.id === id);
+  if (index !== -1) {
+    db.partners.splice(index, 1);
+    db.audit_logs.push({
+      id: `audit-${Date.now()}`,
+      entity_type: 'PARTNER',
+      entity_id: id,
+      action: 'DELETE_PARTNER',
+      actor: 'Admin',
+      created_at: new Date().toISOString(),
+    });
+    saveDbState(db);
+  }
+
+  if (isSupabaseConfigured && supabaseAdmin) {
+    try {
+      const { error } = await supabaseAdmin.from('partners').delete().eq('id', id);
+      if (error) console.error('Supabase deletePartner error:', error);
+    } catch (e) {
+      console.error('Failed to delete partner from Supabase:', e);
+    }
+  }
+
+  return true;
 }
 
 // --------------------------------------------------------------------------

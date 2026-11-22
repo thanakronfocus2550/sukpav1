@@ -26,7 +26,7 @@ export default function PricingPage() {
             อัตราค่าบริการและราคาซัก-อบ
           </h1>
           <p className="text-slate-600 text-base max-w-2xl mx-auto">
-            SUK PA? คิดค่าบริการรับ-ส่งตามระยะหอพัก ส่วนค่าซัก-อบคิดตามราคาจริงหน้าร้านพาร์ทเนอร์
+            SUK PA? คิดค่าบริการรับ-ส่งตามระยะหอพัก ส่วนค่าซัก-อบคิดตามราคาจริงมาตรฐานร้านซักอบ
           </p>
         </div>
 
@@ -68,7 +68,7 @@ export default function PricingPage() {
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <span>ส่งร้านพาร์ทเนอร์ซัก-อบ-พับมาตรฐาน</span>
+                    <span>ดูแลซัก-อบ-พับด้วยเครื่องมาตรฐานสะอาด</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500" />
@@ -139,7 +139,7 @@ export default function PricingPage() {
             </div>
             <div>
               <h2 className="text-2xl font-black text-slate-900">
-                ตารางราคาซัก-อบ หน้าร้านพาร์ทเนอร์
+                ตารางราคาเครื่องซักและอบผ้า
               </h2>
               <p className="text-xs text-slate-500">
                 ราคามาตรฐานเครื่องอุตสาหกรรม จ่ายตามขนาดและโปรแกรมที่ลูกค้าเลือก

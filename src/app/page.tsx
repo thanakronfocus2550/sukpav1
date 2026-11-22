@@ -42,7 +42,7 @@ export default function HomePage() {
               </h1>
 
               <p className="text-lg sm:text-xl text-slate-600 font-normal max-w-2xl mx-auto lg:mx-0 leading-relaxed">
-                บริการรับ-ส่งผ้าสำหรับนักศึกษา มจพ. ปราจีนบุรี ตัวกลางดูแลรับผ้าจากหน้าห้อง ส่งร้านพาร์ทเนอร์ซัก-อบ-พับเรียบร้อย พร้อมส่งคืนถึงที่พัก{' '}
+                บริการรับ-ส่งผ้าสำหรับนักศึกษา มจพ. ปราจีนบุรี ดูแลรับผ้าจากหน้าห้อง ดำเนินการซัก-อบ-พับเรียบร้อย พร้อมส่งคืนถึงที่พัก{' '}
                 <strong className="text-sky-700 font-semibold">ไม่ต้องสมัครสมาชิก จองง่ายใน 1 นาที</strong>
               </p>
 
@@ -59,8 +59,8 @@ export default function HomePage() {
                   <span className="text-xs text-slate-400">/ออเดอร์</span>
                 </div>
                 <div className="px-4 py-2.5 rounded-2xl bg-sky-50 border border-sky-200 shadow-sm flex items-center gap-2 text-sky-800 text-xs font-semibold">
-                  <Smile className="w-4 h-4 text-sky-500" />
-                  <span>พาร์ทเนอร์มืออาชีพ ค่าตอบแทน 5 บ./ตะกร้า</span>
+                  <Sparkles className="w-4 h-4 text-sky-500" />
+                  <span>ซักแยกถัง อบแห้งสนิท พับเรียบร้อย</span>
                 </div>
               </div>
 
@@ -168,9 +168,9 @@ export default function HomePage() {
               <div className="w-12 h-12 rounded-2xl bg-indigo-500 text-white font-extrabold text-lg flex items-center justify-center shadow-cute-button mb-4">
                 3
               </div>
-              <h3 className="text-lg font-bold text-slate-800 mb-1">พาร์ทเนอร์ซัก-อบ</h3>
+              <h3 className="text-lg font-bold text-slate-800 mb-1">ซักและอบผ้า</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                ส่งร้านพาร์ทเนอร์เครื่องมาตรฐาน สะอาด ซัก-อบแห้ง พับเรียบร้อย
+                ดำเนินการซักและอบด้วยเครื่องมาตรฐาน สะอาด แห้งสนิท พับเรียบร้อย
               </p>
             </div>
 
@@ -215,9 +215,9 @@ export default function HomePage() {
               <div className="w-14 h-14 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center">
                 <HeartHandshake className="w-7 h-7" />
               </div>
-              <h3 className="text-xl font-bold text-slate-900">โมเดลร้านพาร์ทเนอร์ชุมชน</h3>
+              <h3 className="text-xl font-bold text-slate-900">เครื่องซักอบมาตรฐานระดับมืออาชีพ</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                ร่วมมือกับร้านซักอบรีดรอบ มจพ. ปราจีนบุรี กระจายรายได้สู่ชุมชน พร้อมมาตรฐานดูแลรักษาผ้าของคุณอย่างดีที่สุด
+                ใช้เครื่องซักอบมาตรฐานอุตสาหกรรม ซักสะอาด อบแห้งสนิท พร้อมกลิ่นหอม สดชื่น พับเรียบร้อยถึงมือคุณ
               </p>
             </div>
 
