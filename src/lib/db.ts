@@ -834,7 +834,6 @@ export async function assignPartnerAndBaskets(
         partner_id: partner.id,
         actual_partner_baskets: Number(actualBaskets),
         partner_commission_rate: commissionRate,
-        status: 'SENT_TO_PARTNER',
         sent_to_partner_at: sentAt,
         updated_at: sentAt,
       })
@@ -901,7 +900,6 @@ export async function assignPartnerAndBaskets(
   order.actual_partner_baskets = Number(actualBaskets);
   order.partner_commission_rate = commissionRate;
   order.partner_commission_total = Number(actualBaskets) * commissionRate;
-  order.status = 'SENT_TO_PARTNER';
   order.sent_to_partner_at = new Date().toISOString();
   order.updated_at = new Date().toISOString();
 
