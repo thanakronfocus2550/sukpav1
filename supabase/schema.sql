@@ -55,23 +55,31 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 
 -- 5. ORDERS
-CREATE TYPE order_status_enum AS ENUM (
-    'NEW',
-    'CONFIRMED',
-    'PICKED_UP',
-    'SENT_TO_PARTNER',
-    'WASHING',
-    'READY',
-    'DELIVERING',
-    'COMPLETED',
-    'CANCELLED'
-);
+DO $$ BEGIN
+    CREATE TYPE order_status_enum AS ENUM (
+        'NEW',
+        'CONFIRMED',
+        'PICKED_UP',
+        'SENT_TO_PARTNER',
+        'WASHING',
+        'READY',
+        'DELIVERING',
+        'COMPLETED',
+        'CANCELLED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE service_type_enum AS ENUM (
-    'WASH',
-    'DRY',
-    'WASH_AND_DRY'
-);
+DO $$ BEGIN
+    CREATE TYPE service_type_enum AS ENUM (
+        'WASH',
+        'DRY',
+        'WASH_AND_DRY'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -143,12 +151,16 @@ CREATE TABLE IF NOT EXISTS partner_basket_records (
 );
 
 -- 8. PARTNER REPORTS (Privacy-guaranteed Partner Summaries)
-CREATE TYPE partner_report_status_enum AS ENUM (
-    'DRAFT',
-    'READY',
-    'SENT',
-    'CONFIRMED'
-);
+DO $$ BEGIN
+    CREATE TYPE partner_report_status_enum AS ENUM (
+        'DRAFT',
+        'READY',
+        'SENT',
+        'CONFIRMED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS partner_reports (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -179,14 +191,18 @@ CREATE TABLE IF NOT EXISTS partner_report_items (
 );
 
 -- 10. PAYMENTS & SLIPS
-CREATE TYPE payment_status_enum AS ENUM (
-    'PENDING',
-    'WAITING_VERIFICATION',
-    'PAID',
-    'WRONG_AMOUNT',
-    'EXPIRED',
-    'REFUNDED'
-);
+DO $$ BEGIN
+    CREATE TYPE payment_status_enum AS ENUM (
+        'PENDING',
+        'WAITING_VERIFICATION',
+        'PAID',
+        'WRONG_AMOUNT',
+        'EXPIRED',
+        'REFUNDED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -205,14 +221,18 @@ CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 
 -- 11. EXPENSES & ACCOUNTING
-CREATE TYPE expense_category_enum AS ENUM (
-    'PARTNER_COMMISSION',
-    'LAUNDRY_COST',
-    'FUEL',
-    'PACKAGING',
-    'MAINTENANCE',
-    'OTHER'
-);
+DO $$ BEGIN
+    CREATE TYPE expense_category_enum AS ENUM (
+        'PARTNER_COMMISSION',
+        'LAUNDRY_COST',
+        'FUEL',
+        'PACKAGING',
+        'MAINTENANCE',
+        'OTHER'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS expenses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -286,31 +306,47 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
 -- Public can read fee settings to calculate booking costs
+DROP POLICY IF EXISTS "Public fee settings read" ON delivery_fee_settings;
 CREATE POLICY "Public fee settings read" ON delivery_fee_settings
     FOR SELECT USING (is_active = TRUE);
 
 -- Public can insert new orders and customers (Booking without login)
+DROP POLICY IF EXISTS "Public insert orders" ON orders;
 CREATE POLICY "Public insert orders" ON orders
     FOR INSERT WITH CHECK (TRUE);
 
+DROP POLICY IF EXISTS "Public insert customers" ON customers;
 CREATE POLICY "Public insert customers" ON customers
     FOR INSERT WITH CHECK (TRUE);
 
 -- Public can read their own order via order_id + phone validation (enforced by API route)
+DROP POLICY IF EXISTS "Service role full access on orders" ON orders;
 CREATE POLICY "Service role full access on orders" ON orders
-    FOR ALL USING (TRUE) WITH CHECK (TRUE);
+    FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
 -- Service role / Admin has full access to all tables
-CREATE POLICY "Service role full access delivery_fee_settings" ON delivery_fee_settings FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access partners" ON partners FOR ALL USING (TRUE);
-CREATE POLICY "Allow public full access partners" ON partners FOR ALL USING (TRUE) WITH CHECK (TRUE);
-CREATE POLICY "Service role full access customers" ON customers FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access payments" ON payments FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access partner_basket_records" ON partner_basket_records FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access partner_reports" ON partner_reports FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access partner_report_items" ON partner_report_items FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access expenses" ON expenses FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access revenue_records" ON revenue_records FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access audit_logs" ON audit_logs FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access notifications" ON notifications FOR ALL USING (TRUE);
-CREATE POLICY "Service role full access app_settings" ON app_settings FOR ALL USING (TRUE);
+DROP POLICY IF EXISTS "Service role full access delivery_fee_settings" ON delivery_fee_settings;
+CREATE POLICY "Service role full access delivery_fee_settings" ON delivery_fee_settings FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access partners" ON partners;
+CREATE POLICY "Service role full access partners" ON partners FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Allow public full access partners" ON partners;
+DROP POLICY IF EXISTS "Service role full access customers" ON customers;
+CREATE POLICY "Service role full access customers" ON customers FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access payments" ON payments;
+CREATE POLICY "Service role full access payments" ON payments FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access partner_basket_records" ON partner_basket_records;
+CREATE POLICY "Service role full access partner_basket_records" ON partner_basket_records FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access partner_reports" ON partner_reports;
+CREATE POLICY "Service role full access partner_reports" ON partner_reports FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access partner_report_items" ON partner_report_items;
+CREATE POLICY "Service role full access partner_report_items" ON partner_report_items FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access expenses" ON expenses;
+CREATE POLICY "Service role full access expenses" ON expenses FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access revenue_records" ON revenue_records;
+CREATE POLICY "Service role full access revenue_records" ON revenue_records FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access audit_logs" ON audit_logs;
+CREATE POLICY "Service role full access audit_logs" ON audit_logs FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access notifications" ON notifications;
+CREATE POLICY "Service role full access notifications" ON notifications FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+DROP POLICY IF EXISTS "Service role full access app_settings" ON app_settings;
+CREATE POLICY "Service role full access app_settings" ON app_settings FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);

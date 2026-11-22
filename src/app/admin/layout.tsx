@@ -24,8 +24,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-const ADMIN_PASSWORD = 'focus0661323388';
-
 const ADMIN_NAV = [
   { href: '/admin', label: 'ภาพรวมระบบ (Dashboard)', icon: LayoutDashboard },
   { href: '/admin/orders', label: 'จัดการออเดอร์ (Orders)', icon: ShoppingBag },
@@ -44,41 +42,61 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    try {
-      const session = localStorage.getItem('sukpa_admin_auth');
-      if (session === ADMIN_PASSWORD) {
-        setIsAuthenticated(true);
-      } else {
+    let active = true;
+    fetch('/api/admin/session', { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'ตรวจสอบสถานะล็อกอินไม่สำเร็จ');
+        if (active) setIsAuthenticated(Boolean(data.authenticated));
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
         setIsAuthenticated(false);
-      }
-    } catch {
-      setIsAuthenticated(false);
-    }
+        setErrorMsg(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (passwordInput.trim() === ADMIN_PASSWORD) {
-      try {
-        localStorage.setItem('sukpa_admin_auth', ADMIN_PASSWORD);
-      } catch {}
+    setIsAuthenticating(true);
+    try {
+      const response = await fetch('/api/admin/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordInput }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'เข้าสู่ระบบไม่สำเร็จ');
+
       setIsAuthenticated(true);
       setErrorMsg('');
-    } else {
-      setErrorMsg('รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+      setPasswordInput('');
+    } catch (error: unknown) {
+      setErrorMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     try {
-      localStorage.removeItem('sukpa_admin_auth');
-    } catch {}
-    setIsAuthenticated(false);
-    setPasswordInput('');
+      const response = await fetch('/api/admin/session', { method: 'DELETE' });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'ออกจากระบบไม่สำเร็จ');
+      setIsAuthenticated(false);
+      setPasswordInput('');
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : String(error));
+    }
   };
 
   // Loading state while checking localStorage
@@ -150,10 +168,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
             <button
               type="submit"
+              disabled={isAuthenticating}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 hover:brightness-105 active:scale-95 text-white font-bold text-sm shadow-lg shadow-sky-500/25 transition-all flex items-center justify-center gap-2"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>เข้าสู่ระบบหลังบ้าน</span>
+              <span>{isAuthenticating ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบหลังบ้าน'}</span>
             </button>
           </form>
 

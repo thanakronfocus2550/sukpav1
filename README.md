@@ -20,6 +20,13 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Environment variables
+
+Copy `.env.example` to `.env.local` for local development and set the required Supabase and Telegram values.
+Set the same variables in the hosting provider's server-side environment configuration for production. Keep `SUPABASE_SECRET_KEY` server-only.
+
+`ADMIN_SECRET_KEY` must be a newly generated random secret with at least 32 characters. Do not reuse the previous admin password or commit real environment values. Rotate any credentials that were previously stored in the example environment file.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDeliveryFees, updateDeliveryFee } from '@/lib/db';
 import { DormType } from '@/lib/types';
+import { requireAdmin } from '@/lib/admin-auth';
 
 export async function GET() {
   try {
@@ -12,6 +13,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     const { dorm_type, fee_amount, actor } = body;

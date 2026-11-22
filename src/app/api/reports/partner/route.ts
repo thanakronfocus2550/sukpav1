@@ -6,8 +6,12 @@ import {
   updatePartnerReportStatus,
 } from '@/lib/db';
 import { PartnerReportStatus } from '@/lib/types';
+import { requireAdmin } from '@/lib/admin-auth';
 
 export async function GET(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
@@ -28,6 +32,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     const { partner_id, report_date, actor } = body;
@@ -44,6 +51,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     const { id, status, actor } = body;

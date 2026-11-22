@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { sendTelegramNotification } from '@/lib/telegram';
+import { requireAdmin } from '@/lib/admin-auth';
 
 export async function POST(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const body = await request.json().catch(() => ({}));
     const result = await sendTelegramNotification({

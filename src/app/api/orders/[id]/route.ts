@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getOrderById, updateOrderStatus, assignPartnerAndBaskets } from '@/lib/db';
 import { OrderStatus } from '@/lib/types';
+import { requireAdmin } from '@/lib/admin-auth';
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const order = await getOrderById(id);
@@ -22,6 +26,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const { id } = await params;
     const body = await request.json();

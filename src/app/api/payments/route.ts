@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getPayments, uploadPaymentSlip, verifyPayment } from '@/lib/db';
+import { requireAdmin } from '@/lib/admin-auth';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const payments = await getPayments();
     return NextResponse.json({ success: true, payments });
@@ -27,6 +31,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const authError = await requireAdmin(request);
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     const { payment_id, status, actor, reject_reason } = body;
