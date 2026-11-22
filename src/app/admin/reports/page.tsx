@@ -116,6 +116,7 @@ export default function AdminReportsPage() {
   const updateReportStatus = async (newStatus: PartnerReportStatus) => {
     if (!activeReport) return;
     try {
+      setErrorMsg('');
       const res = await fetch('/api/reports/partner', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -126,12 +127,11 @@ export default function AdminReportsPage() {
         }),
       });
       const data = await res.json();
-      if (data.success) {
-        setActiveReport(data.report);
-        await fetchData();
-      }
+      if (!res.ok || !data.success) throw new Error(data.error || 'ไม่สามารถอัปเดตสถานะรายงานได้');
+      setActiveReport(data.report);
+      await fetchData();
     } catch (err) {
-      console.error(err);
+      setErrorMsg(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -471,6 +471,11 @@ export default function AdminReportsPage() {
                   CONFIRMED (ร้านยืนยันยอด)
                 </button>
               </div>
+              {errorMsg && (
+                <p className="w-full text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
+                  {errorMsg}
+                </p>
+              )}
             </div>
           </div>
         </div>

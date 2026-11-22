@@ -1306,6 +1306,65 @@ export async function verifyPayment(
   actor: string = 'Admin',
   rejectReason?: string
 ): Promise<Payment> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const verifiedAt = new Date().toISOString();
+    const { data: payment, error: paymentError } = await supabaseAdmin
+      .from('payments')
+      .update({
+        status: newStatus,
+        reject_reason: rejectReason || null,
+        verified_at: verifiedAt,
+        verified_by: actor,
+        updated_at: verifiedAt,
+      })
+      .eq('id', paymentId)
+      .select('*, orders(id,order_id,customer_name,customer_phone,total_amount,status,note)')
+      .single();
+    if (paymentError) throw new Error(`ไม่สามารถอัปเดตการชำระเงินได้: ${paymentError.message}`);
+
+    const order = payment.orders;
+    if (order) {
+      const orderUpdates: Record<string, unknown> = { updated_at: verifiedAt };
+      if (newStatus === 'PAID' && order.status === 'NEW') orderUpdates.status = 'CONFIRMED';
+      await supabaseAdmin.from('orders').update(orderUpdates).eq('id', order.id);
+    }
+
+    if (order) {
+      if (newStatus === 'PAID') {
+        sendTelegramNotification({
+          event: 'PAYMENT_CONFIRMED',
+          orderId: order.order_id,
+          customerName: order.customer_name,
+          amount: Number(order.total_amount),
+        }).catch(console.error);
+      } else if (newStatus === 'WRONG_AMOUNT') {
+        sendTelegramNotification({
+          event: 'WRONG_AMOUNT',
+          orderId: order.order_id,
+          customerName: order.customer_name,
+          phone: order.customer_phone,
+          reason: rejectReason,
+        }).catch(console.error);
+      }
+    }
+
+    return {
+      id: payment.id,
+      order_id: payment.order_id,
+      order_code: order?.order_id || '',
+      customer_name: order?.customer_name || '',
+      customer_phone: order?.customer_phone || '',
+      amount: Number(payment.amount),
+      payment_method: order?.payment_method || 'PROMPTPAY',
+      slip_url: payment.slip_url,
+      status: payment.status,
+      reject_reason: payment.reject_reason,
+      verified_at: payment.verified_at,
+      verified_by: payment.verified_by,
+      created_at: payment.created_at,
+    };
+  }
+
   const db = ensureDbFile();
   const payment = db.payments.find((p) => p.id === paymentId);
   if (!payment) throw new Error('Payment not found');
@@ -1354,6 +1413,34 @@ export async function verifyPayment(
 }
 
 export async function getPayments(): Promise<Payment[]> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin
+      .from('payments')
+      .select('*, orders(id,order_id,customer_name,customer_phone,total_amount,note)')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(`ไม่สามารถดึงรายการชำระเงินได้: ${error.message}`);
+
+    return (data || []).map((payment) => {
+      const order = payment.orders;
+      const isCash = String(order?.note || '').includes('ชำระเงินสด');
+      return {
+        id: payment.id,
+        order_id: payment.order_id,
+        order_code: order?.order_id || '',
+        customer_name: order?.customer_name || '',
+        customer_phone: order?.customer_phone || '',
+        amount: Number(payment.amount),
+        payment_method: isCash ? 'CASH' : 'PROMPTPAY',
+        slip_url: payment.slip_url,
+        status: payment.status,
+        reject_reason: payment.reject_reason,
+        verified_at: payment.verified_at,
+        verified_by: payment.verified_by,
+        created_at: payment.created_at,
+      };
+    });
+  }
+
   const db = ensureDbFile();
   return db.payments;
 }
@@ -1362,6 +1449,18 @@ export async function getPayments(): Promise<Payment[]> {
 // 8. Finance, Expenses & Accounting Summary
 // --------------------------------------------------------------------------
 export async function getExpenses(): Promise<Expense[]> {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data, error } = await supabaseAdmin
+      .from('expenses')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(`ไม่สามารถดึงรายการรายจ่ายได้: ${error.message}`);
+    return (data || []).map((expense) => ({
+      ...expense,
+      amount: Number(expense.amount),
+    }));
+  }
+
   const db = ensureDbFile();
   return db.expenses;
 }
@@ -1379,6 +1478,58 @@ export async function addExpense(expense: Omit<Expense, 'id' | 'created_at'>): P
 }
 
 export async function getFinancialSummary() {
+  if (isSupabaseConfigured && supabaseAdmin) {
+    const { data: orders, error: ordersError } = await supabaseAdmin
+      .from('orders')
+      .select('id,status,delivery_fee,created_at');
+    if (ordersError) throw new Error(`ไม่สามารถดึงสรุปออเดอร์ได้: ${ordersError.message}`);
+
+    const { data: expenses, error: expensesError } = await supabaseAdmin
+      .from('expenses')
+      .select('amount,category');
+    if (expensesError) throw new Error(`ไม่สามารถดึงสรุปรายจ่ายได้: ${expensesError.message}`);
+
+    const orderRows = orders || [];
+    const expenseRows = expenses || [];
+    const todayStr = new Date().toISOString().split('T')[0];
+    const totalOrders = orderRows.length;
+    const completedOrders = orderRows.filter((order) => order.status === 'COMPLETED').length;
+    const pendingOrders = orderRows.filter((order) => order.status === 'NEW' || order.status === 'CONFIRMED').length;
+    const activeOrders = orderRows.filter((order) =>
+      ['PICKED_UP', 'SENT_TO_PARTNER', 'WASHING', 'READY', 'DELIVERING'].includes(order.status)
+    ).length;
+
+    let totalRevenue = 0;
+    let todayRevenue = 0;
+    for (const order of orderRows) {
+      if (order.status !== 'CANCELLED') {
+        const fee = Number(order.delivery_fee || 0);
+        totalRevenue += fee;
+        if (String(order.created_at || '').startsWith(todayStr)) todayRevenue += fee;
+      }
+    }
+
+    let totalExpenses = 0;
+    let partnerCommissionExpense = 0;
+    for (const expense of expenseRows) {
+      const amount = Number(expense.amount || 0);
+      totalExpenses += amount;
+      if (expense.category === 'PARTNER_COMMISSION') partnerCommissionExpense += amount;
+    }
+
+    return {
+      totalOrders,
+      completedOrders,
+      pendingOrders,
+      activeOrders,
+      todayRevenue,
+      totalRevenue,
+      totalExpenses,
+      partnerCommissionExpense,
+      grossProfit: totalRevenue - totalExpenses,
+    };
+  }
+
   const db = ensureDbFile();
   const orders = db.orders;
 
